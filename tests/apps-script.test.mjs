@@ -8,7 +8,7 @@ function backend(){
  const ctx=vm.createContext({console,Date,Set,Map,LockService:{getScriptLock:()=>({tryLock:()=>{locks.taken++;return true;},releaseLock:()=>locks.released++})},SpreadsheetApp:{openById:()=>({getId:()=> 'test-sheet-123456',getName:()=> 'Test'})}});
  vm.runInContext(code,ctx);
  // Replace storage boundary only: validation, idempotency and locking remain real.
- ctx.schema_=()=>{};ctx.table_=(_,name)=>tables.get(name)||[];
+ ctx.writeData_=()=>{};ctx.schema_=()=>{};ctx.table_=(_,name)=>tables.get(name)||[];
  ctx.append_=(_,name,rows)=>{writes.push({name,rows});tables.set(name,[...(tables.get(name)||[]),...rows.map(r=>r.map(String))]);};
  const call=(action,payload)=>ctx.pimCall({sheetId:'test-sheet-123456',action,payload});
  return {ctx,tables,writes,locks,call};

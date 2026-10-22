@@ -26,6 +26,8 @@ jobs:
           node --check app.mjs
           node --check google.mjs
           node --check transfer.mjs
+          node --check pdf.mjs
+          node --check theme.mjs
           node scripts/build-apps-script.mjs
           npm test
       - name: Prepare public files

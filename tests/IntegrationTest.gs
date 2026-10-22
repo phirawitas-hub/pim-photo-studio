@@ -15,7 +15,7 @@ function testPimIntegration() {
     const source=ss.getSheetByName('IMP_testbatch_1').getRange(1,1,1,4);
     check(source.getDisplayValues()[0].join('|')==="0001|=1+1|'literal quote|normal",'literal imported text');
     check(source.getFormulas()[0].every(v=>!v),'formulas not executed');
-    call('sourceMeta',{batchId:'testbatch',part:1,text:'{"test":true}'});
+    call('sourceMeta',{batchId:'testbatch',part:1,text:JSON.stringify({sheets:[{name:'Test',cells:[{address:'A1',value:'Item Code',type:'s'},{address:'B1',value:'Product Name',type:'s'},{address:'A2',value:'TEST-PHOTO',type:'s'},{address:'B2',value:'Integration test',type:'s'}]}]})});
     const now=new Date().toISOString();
     call('products',{rows:[['testproduct','TEST-PHOTO','Integration test','','testbatch','Test',2,now]]});
     call('finishImport',{row:['testbatch','test.csv',now,originalId,'Test',1]});
@@ -27,7 +27,8 @@ function testPimIntegration() {
     const saved=call('revision',rev);check(saved.id===call('revision',rev).id,'revision retry');
     check(call('read',{name:'PIM_Revisions'}).length===1,'single revision');
     check(call('read',{name:'PIM_Files'}).length===2,'single original and photo');
-    console.log('PASS: live Sheets write/read, literal text, Drive original/photo upload/download, upload retry, revision retry');
+    const data=ss.getSheetByName('Data');check(data.getLastRow()===2,'single Data row after retry');const heads=data.getRange(1,1,1,data.getLastColumn()).getDisplayValues()[0];const photoCell=data.getRange(2,heads.indexOf('Top view 1')+1);check(photoCell.getRichTextValue().getLinkUrl()==='https://drive.google.com/file/d/'+photoId+'/view','clickable Drive link in Data');check(data.getRange(2,heads.indexOf('รหัสสินค้า')+1).getDisplayValue()==='TEST-PHOTO','Data code heading');
+    console.log('PASS: Data headings, clickable Drive links, no duplicate Data rows; live Sheets write/read, literal text, Drive original/photo upload/download, upload retry, revision retry');
   } finally {
     const root=props.getProperty('pim-root-'+sheetId);
     if(root)DriveApp.getFolderById(root).setTrashed(true);

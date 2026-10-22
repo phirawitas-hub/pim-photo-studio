@@ -10,7 +10,8 @@ function rpc(action,payload={}){
  if(!config?.sheetId)throw Error('กรุณาระบุ Google Sheet');
  return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(e.message||String(e)))).pimCall({sheetId:config.sheetId,action,payload}));
 }
-export async function connect(c){configure(c);online=false;const r=await rpc('hello');title=r.title;online=true;}
+export async function connect(c){configure(c);online=false;const r=await rpc('hello');title=r.title;await syncData();online=true;}
+export async function syncData(batchId){let offset=0;do{const r=await rpc('syncData',{batchId,offset});offset=r.next;}while(offset!==null);}
 export async function checkConnection(){return title;}
 export async function readTable(name){return rpc('read',{name});}
 async function base64(blob){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error('อ่านไฟล์ไม่สำเร็จ'));reader.readAsDataURL(blob);});}
@@ -19,7 +20,7 @@ function assertSheet(record){if(record.sheetId&&record.sheetId!==config.sheetId)
 export async function syncImport(batch,products,onProgress=()=>{}){
  assertSheet(batch);
  const imports=await readTable('PIM_Imports');
- if(imports.some(r=>r[0]===batch.id)){batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);return;}
+ if(imports.some(r=>r[0]===batch.id)){await syncData(batch.id);batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);return;}
  onProgress('เก็บไฟล์ต้นฉบับใน Drive ผ่าน Apps Script');
  batch.driveId=await upload(batch.file,{key:'import-'+batch.id,kind:'import',name:batch.name});await db.put('imports',batch);
  for(let s=0;s<batch.workbook.sheets.length;s++){
@@ -32,14 +33,14 @@ export async function syncImport(batch,products,onProgress=()=>{}){
  const records=products.map(p=>[p.id,p.code,p.name,p.purpose,batch.id,p.sourceSheet,p.sourceRow,p.createdAt]);
  for(let start=0;start<records.length;start+=250)await rpc('products',{rows:records.slice(start,start+250)});
  await rpc('finishImport',{row:[batch.id,batch.name,batch.createdAt,batch.driveId,batch.workbook.sheets.map(s=>s.name).join(' | '),products.length]});
- batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);
+ await syncData(batch.id);batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);
 }
 export async function saveProduct(p,onProgress=()=>{}){
  validatePhotos(p);assertSheet(p);
  const batch=await db.get('imports',p.importId);
  if(batch){assertSheet(batch);if(!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),onProgress);}
  const latest=(await readTable('PIM_Revisions')).filter(r=>r[1]===p.id).at(-1);
- if(p.pendingRevision&&latest?.[0]===p.pendingRevision){p.baseRevision=p.pendingRevision;p.pendingRevision=null;p.dirty=false;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
+ if(p.pendingRevision&&latest?.[0]===p.pendingRevision){await rpc('revision',{id:p.pendingRevision,productId:p.id});p.baseRevision=p.pendingRevision;p.pendingRevision=null;p.dirty=false;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
  if((latest?.[0]||null)!==(p.baseRevision||null))throw Error('มีเวอร์ชันใหม่ในชีต กรุณาตรวจประวัติก่อนบันทึก');
  for(const a of ANGLES){for(const [i,photo] of (p.photos?.[a.id]||[]).entries()){
   if(photo.fileId)continue;

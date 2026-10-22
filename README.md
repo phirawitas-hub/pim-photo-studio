@@ -1,94 +1,84 @@
 # PIM Photo Studio
 
-เว็บแอปถ่ายรูปสินค้าสำหรับ GitHub Pages รองรับภาษาไทยและมือถือ
+เว็บถ่ายรูปสินค้า ใช้ Google Apps Script บันทึกข้อมูลใน Google Sheets และเก็บรูปใน Google Drive
+ซอร์สโค้ดและไฟล์หน้าตาเว็บอยู่บน GitHub ส่วนหน้าใช้งานที่เชื่อม Google เปิดผ่าน Apps Script
+ไม่ต้องสร้าง OAuth Client ID เปิด Advanced Services หรือผูก Billing
+
+## เปิดใช้ครั้งแรก
+1. เข้า https://script.google.com/ แล้วสร้างโปรเจกต์
+2. ใส่เนื้อหา apps-script/Code.gs ในไฟล์สคริปต์ และสร้างไฟล์ HTML ชื่อ Index จาก apps-script/Index.html
+3. Deploy → New deployment → Web app
+4. Execute as: Me และ Who has access: Only myself สำหรับการใช้งานบัญชีนี้
+5. อนุญาตสิทธิ์ Google Sheets และ Drive ครั้งแรก แล้วเปิด Web app URL ที่ลงท้าย /exec
+6. หน้าเชื่อมต่อ Google: ใส่ลิงก์ชีตที่คุณแก้ไขได้ แล้วกดบันทึกและเชื่อมต่อชีต
+7. Import Excel/CSV เลือกแท็บและคอลัมน์ แล้วเริ่มถ่ายรูป
+
+การตั้งค่านี้เปิดให้เจ้าของบัญชีเท่านั้น ห้ามเปลี่ยนเป็น Anyone โดยไม่เพิ่มระบบตรวจผู้ใช้ก่อน
+Google ขอสิทธิ์ Sheets และ Drive ตามบริการในสคริปต์ สิทธิ์ DriveApp ครอบคลุม Drive ของบัญชี แต่โค้ดนี้สร้าง/อ่านไฟล์ของแอปและชีตที่ระบุ ไม่เปลี่ยนการแชร์ไฟล์
 
 ## ใช้งาน
-1. Import File → เลือก Excel หรือ CSV (ไม่เกิน 25 MB)
-2. เลือกแท็บ ตรวจหัวตาราง คอลัมน์รหัสสินค้า ชื่อสินค้า และวัตถุประสงค์
-3. เปิดสินค้า แล้วถ่ายรูปจากกล้องหรือเลือก JPG / PNG / WebP
-4. 7 มุมบังคับต้องมีอย่างน้อยมุมละ 1 รูป ส่วน All Component เป็นตัวเลือก ทุกมุมสูงสุด 5 รูป
-5. บันทึกลง Google → อัปโหลดภาพและสร้าง revision ในชีต
+- Import ไฟล์ .xlsx/.xls/.csv สูงสุด 25 MB และเก็บข้อมูลทุกแท็บ
+- สร้างคิวถ่ายจากแท็บที่เลือก รหัสซ้ำรวมเป็นงานเดียว แต่ข้อมูลต้นฉบับยังเก็บครบ
+- 8 มุม: Top, Under, Left, Right, Physical Product (Inner), Original Package (Outer), Delivery Package, All Component
+- 7 มุมแรกบังคับ อย่างน้อยมุมละหนึ่งรูป ทุกมุมไม่เกิน 5 รูป
+- JPG/PNG/WebP สูงสุด 20 MB ต่อรูป
+- ปุ่มถ่ายรูปบน Apps Script ใช้กล้องผ่านตัวเลือกไฟล์ของมือถือ บนคอมพิวเตอร์อาจเปิดตัวเลือกไฟล์แทน
+- กดบันทึกลง Google เพื่ออัปโหลดรูปและบันทึก revision
+- ฉบับร่างอยู่ใน IndexedDB จนกดบันทึก Google การล้างข้อมูลเว็บไซต์อาจลบฉบับร่าง
+- กดรีเฟรชจากชีตเพื่ออ่านข้อมูลล่าสุดจากอีกเครื่อง
 
-ฉบับร่างเก็บใน IndexedDB ของเบราว์เซอร์นี้ ไม่ใช่ Google และไม่ใช่ระบบสำรองถาวร
-เปิดเว็บจาก HTTPS หรือ localhost กล้องจึงใช้งานได้
-
-## รันในเครื่อง
-ต้องมี Node.js 22 ขึ้นไป ไม่ต้องติดตั้ง dependencies
-รัน npm start แล้วเปิด http://127.0.0.1:4173
-รันทดสอบด้วย npm test
+## ย้ายฉบับร่างจากเว็บ GitHub
+GitHub และ Apps Script เป็นคนละเว็บไซต์ ฉบับร่างจึงแยกกัน
+หน้าเชื่อมต่อ Google ในเว็บเดิม → ส่งออกฉบับร่างทั้งหมด → เปิด Apps Script → นำเข้าฉบับร่าง → ใส่ชีตเดิมแล้วบันทึก
+ไฟล์ JSON นี้มีรูปและข้อมูลต้นฉบับ เก็บเป็นส่วนตัว การนำเข้าจะไม่ทับรายการที่มีอยู่ในเบราว์เซอร์ปลายทาง
 
 ## GitHub Pages
-1. สร้าง repository ชื่อ pim-photo-studio
-2. นำไฟล์โปรเจกต์ขึ้น branch main รวม .github/workflows/pages.yml
-3. Settings → Pages → Build and deployment → Source: GitHub Actions
-4. Actions → Test and deploy GitHub Pages → Run workflow
-5. เปิด URL ที่งาน Deploy ส่งกลับ
-
-Workflow ทดสอบก่อน deploy และส่งเฉพาะไฟล์เว็บเข้า Pages artifact
-ไม่เพิ่ม Excel จริง รูปสินค้า tokens หรือ secrets ลง repository
-ข้อมูลผู้ใช้ไม่ได้ฝังใน HTML หรือ GitHub
-
-## ตั้งค่า Google ครั้งแรก
-แอปเป็น static website ใช้ Google Identity Services token model ไม่มี backend และไม่มี Client Secret
-
-1. เปิด https://console.cloud.google.com/ และสร้าง/เลือก project
-2. เปิด Google Sheets API และ Google Drive API
-3. ตั้งค่า Google Auth Platform / OAuth consent screen:
-   - กำหนดชื่อแอปและ support email ของเจ้าของ
-   - Internal หากองค์กรรองรับ หรือ External
-   - ถ้าใช้ Testing ให้เพิ่มบัญชีที่ใช้งานเป็น Test users
-   - scopes: https://www.googleapis.com/auth/spreadsheets และ https://www.googleapis.com/auth/drive.file
-4. สร้าง OAuth Client ประเภท Web application
-5. Authorized JavaScript origins:
-   - GitHub Pages: https://ชื่อบัญชี.github.io (ไม่มี path ต่อท้าย)
-   - ทดสอบในเครื่อง: http://127.0.0.1:4173
-6. คัดลอก Client ID ที่ลงท้าย .apps.googleusercontent.com
-7. แอป → เชื่อมต่อ Google → ใส่ Client ID และ URL ของชีต → บันทึกการตั้งค่า
-8. เชื่อมต่อ Google ด้วยบัญชีที่มีสิทธิ์แก้ไขชีต
-
-ไม่ใส่ Client Secret / access token ใน repository
-Access token อยู่ในหน่วยความจำเท่านั้น ต้องเชื่อมใหม่เมื่อหมดอายุ
-บัญชีองค์กรอาจต้องให้ผู้ดูแลอนุมัติ OAuth และการใช้หลายบัญชีอาจต้องผ่าน Google verification
-แอปไม่เปลี่ยนสิทธิ์แชร์ไฟล์หรือเปิด public sharing อัตโนมัติ
+GitHub Pages ใช้ดู/จัดฉบับร่างและเป็นทางเข้าเว็บ Apps Script
+หน้าเชื่อมต่อ Google มีช่องใส่ Web app URL พร้อมปุ่มเปิดเว็บ
+ใส่ URL สาธารณะของ deployment ใน deployment.mjs ได้เพื่อแสดงปุ่มเปิดทันที URL ไม่ใช่รหัสผ่าน และการเข้าเว็บจริงยังจำกัดด้วย Google
+ไม่มี token, Excel หรือรูปผู้ใช้ใน repository
 
 ## โครงสร้างข้อมูล
 | ตำแหน่ง | ข้อมูล |
 | --- | --- |
-| PIM_Products | รหัส ชื่อ วัตถุประสงค์ Import ID และแถวต้นฉบับ |
-| PIM_Revisions | รายละเอียด ขนาด/น้ำหนัก และ Drive File ID ของภาพทุกมุมในแต่ละเวอร์ชัน |
-| PIM_Imports | ประวัติไฟล์และ Drive File ID ต้นฉบับ |
-| IMP_… | ค่าที่แสดงในทุกแท็บต้นฉบับ ตามแถว/คอลัมน์เดิม |
-| PIM_Source | ชนิดเซลล์ ค่าดิบ สูตร รูปแบบ comments links merged ranges เป็น JSON แบ่งชิ้น |
-| Drive / PIM Photo Studio / Imports | ไฟล์ต้นฉบับครบทุกองค์ประกอบ |
-| Drive / PIM Photo Studio / รหัสสินค้า / มุม | รูปต้นฉบับ JPG/PNG/WebP |
+| PIM_Products | รายการสินค้าและตำแหน่งแถวต้นฉบับ |
+| PIM_Revisions | รายละเอียด ขนาด/น้ำหนัก และรายการ Drive File ID ต่อเวอร์ชัน |
+| PIM_Imports | ไฟล์ต้นฉบับและเครื่องหมายว่านำเข้าครบแล้ว |
+| IMP_… | ข้อมูลที่แสดงในทุกแท็บ ตามแถว/คอลัมน์เดิม |
+| PIM_Source | ค่าดิบ สูตร ชนิดเซลล์ รูปแบบ comments links และ merges เป็น JSON แบ่งชิ้น |
+| PIM_Files | ดัชนีไฟล์เพื่ออัปโหลดซ้ำได้อย่างปลอดภัย |
+| Drive / PIM Photo Studio - ชื่อชีต / Imports | ไฟล์ต้นฉบับ |
+| Drive / PIM Photo Studio - ชื่อชีต / รหัสสินค้า / มุม | ภาพถ่ายต้นฉบับ |
 
-สูตรจากไฟล์เก็บเป็นข้อมูล ไม่รันสูตรจากไฟล์ใน Google Sheet
-รูปแบบหน้ากระดาษ รูปฝัง และองค์ประกอบ Excel เก็บครบในไฟล์ต้นฉบับใน Drive
-เก็บทุกแท็บ แต่สร้างงานถ่ายจากแท็บที่ผู้ใช้เลือกเท่านั้น
-รหัสซ้ำในแท็บเดียวกันรวมคิวเป็น 1 รายการ โดยยังเก็บทุกแถวต้นฉบับ
-ตรวจไฟล์ซ้ำในเบราว์เซอร์เดียวกันด้วย SHA-256
+สูตรจาก Excel เก็บเป็นข้อความ ไม่เรียกสูตรใน Google Sheet รูปแบบหน้ากระดาษ/รูปฝังเก็บในไฟล์ต้นฉบับ Drive
+คงแท็บเดิมในชีตไว้ และหยุดเมื่อแท็บ PIM_* มีหัวตารางต่างจากสคีมาแอป
 
-## การบันทึกและการทำงานร่วมกัน
-- ใช้ Drive generated IDs ลดไฟล์ซ้ำเมื่อลองอัปโหลดใหม่
-- เก็บประวัติสินค้าเป็น append-only revisions
-- เช็กเวอร์ชันก่อนและหลังอัปโหลด หากเปลี่ยนจะหยุดให้ตรวจประวัติ
-- Google Sheets ไม่มี transaction/row lock ในแอปนี้ จึงควรทำงานคนละสินค้า ไม่แก้งานเดียวกันพร้อมกัน
-- อ่านข้อมูลจากชีตเมื่อกด Refresh ไม่เป็น realtime
-- หลายชีตควรใช้คนละ browser profile เพื่อไม่ปนฉบับร่าง
-- การล้างข้อมูลเว็บไซต์ลบฉบับร่างในเครื่อง ควรบันทึก Google ก่อน
-- นำรูปออกจากฉบับร่างไม่ลบไฟล์ Drive ของเวอร์ชันเดิม
+## การบันทึกและขีดจำกัด
+- LockService ป้องกันการบันทึก revision ชนกัน และตรวจ base revision ก่อนเขียน
+- รายการไฟล์และชื่อคงที่ช่วยให้ลองอัปโหลดใหม่โดยไม่สร้างไฟล์ซ้ำ
+- Import เขียนเป็นชุดพร้อม completion marker อ่านเฉพาะงานที่นำเข้าครบแล้ว
+- การบันทึกเป็นหลายขั้น ไม่ใช่ transaction ทั้งไฟล์ หากเครือข่ายหลุดให้ลองบันทึกซ้ำ
+- การลบรูปในฉบับร่างไม่ลบไฟล์ Drive ของประวัติเดิม
+- Apps Script มีโควตาและเวลาสูงสุดต่อการเรียก งานใหญ่ควรแยกไฟล์และรอให้เสร็จทีละรายการ
+- แหล่งข้อมูลเดิมที่เคยใช้ OAuth และไม่มี PIM_Files ต้องย้ายดัชนีไฟล์ก่อนใช้ตรวจรูปข้ามระบบ
 
-## ตรวจรับก่อนใช้จริง
-จาก GitHub Pages ด้วย OAuth client ของคุณ ให้ทดสอบลงชื่อเข้าใช้และยกเลิก consent, Import ทุกแท็บ,
-บันทึกรูปครบทุกมุมและเปิดจาก Drive, Refresh จากอีกเครื่องที่มีสิทธิ์, ปฏิเสธกล้องแล้วเลือกไฟล์แทน,
-และเครือข่ายขาดระหว่างอัปโหลดแล้วลองใหม่
-การทดสอบอัตโนมัติและ local UI ไม่ทดแทนการทดสอบ Google API จริง
+## พัฒนาและเผยแพร่
+Node.js 22 ขึ้นไป ไม่ต้อง npm install
+- npm start → http://127.0.0.1:4173
+- npm test
+- node scripts/build-apps-script.mjs เพื่อสร้าง Index.html จากหน้าเว็บล่าสุด
+- GitHub Actions ตรวจ syntax และ tests ก่อน deploy Pages
+- หลังแก้ Code.gs ให้คัดลอกลง Apps Script แล้ว Deploy → Manage deployments → Edit → New version
+- Index.html โหลด assets จาก GitHub Pages ผ่าน HTTPS จึงต้องให้ Pages พร้อมใช้งานก่อนเปิดแอป
 
-## แหล่งอ้างอิง
-- [Google Identity Services](https://developers.google.com/identity/oauth2/web/guides/use-token-model)
-- [Drive uploads](https://developers.google.com/workspace/drive/api/guides/manage-uploads)
-- [Sheets append](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets.values/append)
+## ตรวจรับ
+ทดสอบเปิด /exec ด้วยบัญชีที่มีสิทธิ์, เชื่อมชีต, Import ทุกแท็บ, บันทึกรูปแล้วเปิดไฟล์ Drive,
+รีเฟรชจากอีกเบราว์เซอร์, ย้ายฉบับร่าง, และลองใหม่หลังเครือข่ายขาด
+Tests แบบ mock ไม่แทนการตรวจ Google จริง
+
+## อ้างอิง
+- [Apps Script Web apps](https://developers.google.com/apps-script/guides/web)
+- [google.script.run](https://developers.google.com/apps-script/guides/html/communication)
+- [Apps Script quotas](https://developers.google.com/apps-script/guides/services/quotas)
 - [GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
-- [SheetJS](https://docs.sheetjs.com/docs/getting-started/installation/standalone/)
-
-SheetJS 0.20.3 จาก CDN ทางการ พร้อมใบอนุญาตใน vendor/LICENSE
+- [SheetJS](https://docs.sheetjs.com/docs/getting-started/installation/standalone/) 0.20.3 พร้อมใบอนุญาต vendor/LICENSE

@@ -25,6 +25,8 @@ jobs:
         run: |
           node --check app.mjs
           node --check google.mjs
+          node --check transfer.mjs
+          node scripts/build-apps-script.mjs
           npm test
       - name: Prepare public files
         run: |

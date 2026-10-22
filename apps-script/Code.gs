@@ -102,7 +102,7 @@ function upload_(ss,p) {
   if(p.kind==='photo') {
     id_(p.productId);
     if(!PIM_ANGLES.includes(p.angle)||!['image/jpeg','image/png','image/webp'].includes(p.mime))throw Error('มุมภาพหรือชนิดรูปไม่ถูกต้อง');
-    const b=bytes.map(x=>x&255);
+    const b=bytes.slice(0,12).map(x=>x&255);
     const valid=p.mime==='image/jpeg'?b[0]===255&&b[1]===216:p.mime==='image/png'?b.slice(0,8).join(',')==='137,80,78,71,13,10,26,10':String.fromCharCode.apply(null,b.slice(0,4))==='RIFF'&&String.fromCharCode.apply(null,b.slice(8,12))==='WEBP';
     if(!valid)throw Error('เนื้อหาไฟล์ไม่ตรงกับชนิดรูป');
     const product=table_(ss,'PIM_Products').find(r=>r[0]===p.productId);if(!product)throw Error('ไม่พบสินค้าในชีต');

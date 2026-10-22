@@ -6,7 +6,8 @@ function decode(value,max){
  const bytes=Uint8Array.from(atob(value.data),c=>c.charCodeAt(0));if(bytes.length>max)throw Error('ไฟล์ใหญ่เกินกำหนด');return new Blob([bytes],{type:value.type||'application/octet-stream'});
 }
 export async function exportDrafts(){
- const products=await db.all('products'),imports=await db.all('imports'),assets=await db.all('assets');
+ const products=await db.all('products'),imports=await db.all('imports'),allAssets=await db.all('assets');
+ const used=new Set(products.flatMap(p=>Object.values(p.photos||{}).flat().map(ph=>ph.id)));const assets=allAssets.filter(a=>used.has(a.id));
  const snapshot={format:'pim-drafts-v1',products,imports:[],assets:[]};
  for(const b of imports)snapshot.imports.push({...b,file:b.file?await encode(b.file):null});
  for(const a of assets)snapshot.assets.push({...a,blob:a.blob?await encode(a.blob):null});

@@ -29,7 +29,7 @@ Google ขอสิทธิ์ Sheets และ Drive ตามบริกา�
 
 ## ย้ายฉบับร่างจากเว็บ GitHub
 GitHub และ Apps Script เป็นคนละเว็บไซต์ ฉบับร่างจึงแยกกัน
-หน้าเชื่อมต่อ Google ในเว็บเดิม → ส่งออกฉบับร่างทั้งหมด → เปิด Apps Script → นำเข้าฉบับร่าง → ใส่ชีตเดิมแล้วบันทึก
+หน้าเชื่อมต่อ Google ในเว็บเดิม → ส่งออกฉบับร่างทั้งหมด → เปิด Apps Script → นำเข้าฉบับร่าง (หรือวางเนื้อหา JSON) → ใส่ชีตเดิมแล้วบันทึก
 ไฟล์ JSON นี้มีรูปและข้อมูลต้นฉบับ เก็บเป็นส่วนตัว การนำเข้าจะไม่ทับรายการที่มีอยู่ในเบราว์เซอร์ปลายทาง
 
 ## GitHub Pages
@@ -82,3 +82,5 @@ Tests แบบ mock ไม่แทนการตรวจ Google จริง
 - [Apps Script quotas](https://developers.google.com/apps-script/guides/services/quotas)
 - [GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
 - [SheetJS](https://docs.sheetjs.com/docs/getting-started/installation/standalone/) 0.20.3 พร้อมใบอนุญาต vendor/LICENSE
+
+การทดสอบบริการ Google จริง: tests/IntegrationTest.gs ใช้กับตัวแก้ไข Apps Script ชั่วคราว สร้างข้อมูลทดสอบแยก และย้ายไฟล์ทดสอบลงถังขยะหลังเสร็จ

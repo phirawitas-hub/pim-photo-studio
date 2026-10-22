@@ -14,7 +14,7 @@ async function run(fn){if(working)return toast('กำลังบันทึ�
 function fmtDate(v){return v?new Date(v).toLocaleString('th-TH',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';}
 function size(n){return n>=1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB';}
 function stamp(){return new Date().toISOString();}
-function updateConnection(){$('#connection-label').textContent=cloud.connected()?'เชื่อมต่อ Google แล้ว':'ยังไม่เชื่อมต่อ Google';$('#connect-top').classList.toggle('online',cloud.connected());}
+function updateConnection(){$('#connection-label').textContent=!cloud.hosted()?'เปิดเว็บ Apps Script':cloud.connected()?'เชื่อมต่อ Google แล้ว':'เชื่อมต่อชีต';$('#connect-top').classList.toggle('online',cloud.connected());}
 function title(eyebrow,heading,sub,actions=''){return `<div class="page-heading"><div><p class="eyebrow">${eyebrow}</p><h1>${heading}</h1><p class="subtext">${sub}</p></div><div class="actions">${actions}</div></div>`;}
 function badge(p){const s=status(p);return `<span class="badge ${s}">${s==='complete'?icon('check'):''}${{waiting:'รอถ่ายรูป',progress:'กำลังดำเนินการ',complete:'ถ่ายครบแล้ว'}[s]}</span>`;}
 function closeModal(){modal.close();stopCamera();importState=null;}
@@ -24,7 +24,7 @@ function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=
 modal.addEventListener('close',stopCamera);window.addEventListener('pagehide',stopCamera);
 $('#menu').onclick=()=>document.body.classList.toggle('menu-open');
 $('#sidebar').addEventListener('click',e=>{if(e.target.closest('a'))document.body.classList.remove('menu-open');});
-$('#connect-top').onclick=()=>{if(!cloud.hosted()||!settings.sheetId||cloud.connected()){location.hash='settings';return;}run(signIn);};
+$('#connect-top').onclick=()=>{if(!cloud.hosted()){const url=settings.scriptUrl||SCRIPT_URL;if(validScriptUrl(url))window.open(url,'_blank','noopener');else location.hash='settings';return;}if(!settings.sheetId||cloud.connected()){location.hash='settings';return;}run(signIn);};
 async function signIn(){busy('กำลังเชื่อมต่อ Google');await cloud.connect(settings);const name=await cloud.checkConnection();toast('เชื่อมต่อชีต '+name+' แล้ว');updateConnection();if(location.hash==='#settings')renderSettings();}
 async function reloadLocal(){products=await db.all('products');batches=await db.all('imports');$('#nav-count').textContent=products.length;}
 async function route(){await reloadLocal();const r=location.hash.slice(1).split('/');document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===(r[0]==='product'?'products':r[0]||'products')));if(r[0]==='product'){current=products.find(p=>p.id===r[1]);section=r[2]||'gallery';if(!current){location.hash='products';toast('ไม่พบสินค้า',true);return;}renderDetail();}else if(r[0]==='imports')renderImports();else if(r[0]==='settings')renderSettings();else renderProducts();updateConnection();}
@@ -138,4 +138,4 @@ async function saveSettings(notify=true){
 }
 function exportCSV(){const rows=[['Item Code','Product Name','Purpose','Required angles','Photos','Status','Google sync'],...products.map(p=>[p.code,p.name,p.purpose,progress(p).required,progress(p).total,status(p),p.dirty?'Local draft':'Saved'])];const safe=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};const blob=new Blob(['\ufeff'+rows.map(r=>r.map(safe).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PIM-Photo-Report-'+new Date().toISOString().slice(0,10)+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||'เกิดข้อผิดพลาด กรุณาลองใหม่',true);});
-await run(async()=>{settings=await db.get('settings','config')||settings;cloud.configure(settings);await route();});
+await run(async()=>{settings=await db.get('settings','config')||settings;cloud.configure(settings);await route();if(cloud.hosted()&&settings.sheetId){try{await cloud.connect(settings);updateConnection();if(location.hash==='#settings')renderSettings();else if(current&&section==='gallery')hydrateImages();}catch(e){toast(e.message,true);}}});

@@ -25,6 +25,7 @@ jobs:
         run: |
           node --check app.mjs
           node --check google.mjs
+          node --check bridge.mjs
           node --check transfer.mjs
           node --check pdf.mjs
           node --check theme.mjs

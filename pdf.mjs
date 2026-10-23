@@ -38,7 +38,8 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
   start(p,'PRODUCT PHOTOGRAPHY REPORT');
   const status=count.required===7?'ถ่ายครบทั้ง 7 มุมบังคับ':'อยู่ระหว่างถ่ายภาพ';
   await block(p,'สถานะ',status+' · '+count.total+' รูป · '+count.required+'/7 มุมบังคับ'+(p.dirty||!p.syncedAt?' · ฉบับร่างในเครื่อง':''));
-  await block(p,'วัตถุประสงค์',p.purpose);for(const [key,label] of Object.entries({company:'Company',brand:'Brand',group:'Item Group',size:'Size',color:'Color',style:'Style',po:'Purchase Order (PO NO.)',lot:'Ref. Lot No.',uom:'UOM',remark:'Remark'}))await block(p,label,p.fields?.[key]);
+  await block(p,'Revision ที่เลือก',String(p.revisionNumber||'ฉบับร่าง'));await block(p,'บันทึกลงชีตล่าสุด',p.syncedAt?new Date(p.syncedAt).toLocaleString('th-TH',{timeZone:'Asia/Bangkok'}):'ยังไม่บันทึก');
+  await block(p,'วัตถุประสงค์',p.purpose);for(const [key,label] of Object.entries({photographer:'ชื่อผู้ถ่าย',company:'Company',brand:'Brand',group:'Item Group',size:'Size',color:'Color',style:'Style',po:'Purchase Order (PO NO.)',lot:'Ref. Lot No.',uom:'UOM',remark:'Remark'}))await block(p,label,p.fields?.[key]);
   for(const [key,label] of [['physical','Physical Product'],['inner','Original Package (Inner)'],['outer','Original Package (Outer)'],['delivery','Delivery Package']]){const d=p.dimensions?.[key];if(d&&Object.values(d).some(v=>v!==''&&v!==null))await block(p,label,['width','length','height','net','gross'].map((k,i)=>['Width','Length','Height','Net Weight','Gross Weight'][i]+': '+(d[k]??'—')+(i<3?' cm':' kg')).join('   /   '));}
   await block(p,'รายการภาพ',ANGLES.map(a=>a.name+' · '+(p.photos?.[a.id]?.length||0)+' รูป').join('\n'));
   await finish(p);

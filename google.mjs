@@ -1,16 +1,17 @@
+import {bridgeCall,resetBridge} from './bridge.mjs';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
 import * as db from './store.mjs';
 let config=null,online=false,title='';
 export const hosted=()=>!!globalThis.google?.script?.run;
-export const connected=()=>hosted()&&online;
+export const connected=()=>online;
 export function configure(c){config=c;}
-export function disconnect(){online=false;}
+export function disconnect(){online=false;resetBridge();}
 function rpc(action,payload={}){
- if(!hosted())throw Error('เปิดเว็บผ่าน Apps Script ก่อน เพื่อบันทึกลง Sheets และ Drive');
- if(!config?.sheetId)throw Error('กรุณาระบุ Google Sheet');
- return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(e.message||String(e)))).pimCall({sheetId:config.sheetId,action,payload}));
+ const request={sheetId:config?.sheetId||'',action,payload};
+ if(!hosted())return bridgeCall(request);
+ return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(e.message||String(e)))).pimCall(request));
 }
-export async function connect(c){configure(c);online=false;const r=await rpc('hello');title=r.title;await syncData();online=true;}
+export async function connect(c){configure(c);online=false;const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);await syncData();online=true;}
 export async function syncData(batchId){let offset=0;do{const r=await rpc('syncData',{batchId,offset});offset=r.next;}while(offset!==null);}
 export async function checkConnection(){return title;}
 export async function readTable(name){return rpc('read',{name});}
@@ -39,9 +40,10 @@ export async function saveProduct(p,onProgress=()=>{}){
  validatePhotos(p);assertSheet(p);
  const batch=await db.get('imports',p.importId);
  if(batch){assertSheet(batch);if(!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),onProgress);}
- const latest=(await readTable('PIM_Revisions')).filter(r=>r[1]===p.id).at(-1);
- if(p.pendingRevision&&latest?.[0]===p.pendingRevision){await rpc('revision',{id:p.pendingRevision,productId:p.id});p.baseRevision=p.pendingRevision;p.pendingRevision=null;p.dirty=false;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
- if((latest?.[0]||null)!==(p.baseRevision||null))throw Error('มีเวอร์ชันใหม่ในชีต กรุณาตรวจประวัติก่อนบันทึก');
+ const history=await itemHistory(p.code),latest=history.at(-1);
+ if(!String(p.fields?.photographer||'').trim())throw Error('กรุณาระบุชื่อผู้ถ่าย');
+ if(p.pendingRevision&&latest?.[0]===p.pendingRevision){await rpc('revision',{id:p.pendingRevision,productId:p.id});p.baseRevision=p.pendingRevision;p.itemHead=p.pendingRevision;p.revisionNumber=history.length;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
+ if((latest?.[0]||null)!==(p.itemHead||p.baseRevision||null))throw Error('มีเวอร์ชันใหม่ในชีต กรุณาตรวจประวัติก่อนบันทึก');
  for(const a of ANGLES){for(const [i,photo] of (p.photos?.[a.id]||[]).entries()){
   if(photo.fileId)continue;
   const asset=await db.get('assets',photo.id);if(!asset?.blob)throw Error('ไม่พบไฟล์รูปต้นฉบับ กรุณาเลือกรูปใหม่');
@@ -51,11 +53,16 @@ export async function saveProduct(p,onProgress=()=>{}){
  p.pendingRevision=p.pendingRevision||uid();await db.put('products',p);
  const photos=Object.fromEntries(ANGLES.map(a=>[a.id,(p.photos?.[a.id]||[]).map(x=>({id:x.id,fileId:x.fileId,name:x.name||'',size:x.size||0}))]));
  onProgress('บันทึกเวอร์ชันลง Google Sheet');
- const r=await rpc('revision',{id:p.pendingRevision,productId:p.id,baseRevision:p.baseRevision||null,meta:{fields:p.fields||{},dimensions:p.dimensions||{},purpose:p.purpose||''},photos});
- p.baseRevision=r.id;p.pendingRevision=null;p.dirty=false;p.sheetId=config.sheetId;p.syncedAt=r.at;await db.put('products',p);
+ const r=await rpc('revision',{id:p.pendingRevision,productId:p.id,baseRevision:p.itemHead||p.baseRevision||null,meta:{fields:p.fields||{},dimensions:p.dimensions||{},purpose:p.purpose||''},photos});
+ p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.sheetId=config.sheetId;p.syncedAt=r.at;await db.put('products',p);
 }
+export async function itemHistory(code){return rpc('itemHistory',{code});}
+export async function stock(code){return rpc('stock',{code});}
+export async function selectRevision(p,revisionId){assertSheet(p);const r=await rpc('selectRevision',{productId:p.id,revisionId});const history=await itemHistory(p.code);applyRevision(p,r.revision,history);p.syncedAt=r.at;await db.put('products',p);return p;}
+export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
 export async function loadProducts(){
- const completed=new Set((await readTable('PIM_Imports')).map(r=>r[0]));const rows=(await readTable('PIM_Products')).filter(r=>completed.has(r[4]));const revisions=await readTable('PIM_Revisions');const map=new Map();for(const r of revisions)map.set(r[1],r);
- return rows.map(r=>{const rev=map.get(r[0]);const meta=rev?JSON.parse(rev[4]||'{}'):{};return {id:r[0],code:r[1],name:r[2],purpose:meta.purpose??r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7],fields:meta.fields||{},dimensions:meta.dimensions||{},photos:rev?JSON.parse(rev[5]||'{}'):{},baseRevision:rev?.[0]||null,dirty:false,sheetId:config.sheetId,syncedAt:rev?.[2]||null};});
+ const completed=new Set((await readTable('PIM_Imports')).map(r=>r[0])),rows=(await readTable('PIM_Products')).filter(r=>completed.has(r[4])),revisions=await readTable('PIM_Revisions'),selections=await readTable('PIM_Selections');
+ const key=v=>String(v||'').normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase();
+ return rows.map(r=>{const ids=new Set(rows.filter(x=>key(x[1])===key(r[1])).map(x=>x[0])),history=revisions.filter(x=>ids.has(x[1])),selection=selections.filter(x=>x[0]===r[0]).at(-1),rev=selection?history.find(x=>x[0]===selection[1]):history.filter(x=>x[1]===r[0]).at(-1);const p={id:r[0],code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7]};applyRevision(p,rev,history);p.syncedAt=selection?.[2]||p.syncedAt;return p;});
 }
 export async function photoBlob(fileId){const r=await rpc('photo',{fileId});return new Blob([Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0))],{type:r.mime});}

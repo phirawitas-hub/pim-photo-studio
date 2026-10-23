@@ -31,11 +31,30 @@ test('revision validates limits, image ownership and concurrent base before writ
 });
 test('a retried revision returns its existing result without a duplicate write',()=>{
  const b=backend();productFixture(b);b.ctx.SpreadsheetApp.flush=()=>{};
- const payload={id:'revision1',productId:'p1',baseRevision:null,photos:{top:[{fileId:'f0'}]},meta:{purpose:'Test'}};
+ const payload={id:'revision1',productId:'p1',baseRevision:null,photos:{top:[{fileId:'f0'}]},meta:{purpose:'Test',fields:{photographer:'QA'}}};
  const first=b.call('revision',payload),again=b.call('revision',payload);
- assert.equal(first.id,again.id);assert.equal(first.at,again.at);assert.equal(b.writes.length,1);assert.equal(b.writes[0].rows[0][3],false);
+ assert.equal(first.id,again.id);assert.equal(first.at,again.at);assert.equal(b.writes.filter(w=>w.name==='PIM_Revisions').length,1);assert.equal(b.writes.filter(w=>w.name==='PIM_Selections').length,1);assert.equal(b.writes[0].rows[0][3],false);
 });
 test('source parts are idempotent and formula-like strings are escaped before SpreadsheetApp',()=>{
  const b=backend();b.call('sourceMeta',{batchId:'batch1',part:1,text:'{"formula":"=SUM(A1)"}'});b.call('sourceMeta',{batchId:'batch1',part:1,text:'{"formula":"=SUM(A1)"}'});
  assert.equal(b.writes.length,1);assert.equal(b.ctx.raw_('=IMPORTXML("x")'),"'=IMPORTXML(\"x\")");assert.equal(b.ctx.raw_("'leading quote"),"''leading quote");assert.equal(b.ctx.raw_('00123'),"'00123");assert.equal(b.ctx.raw_(42),42);
+});
+
+test('same item across imports reuses immutable revision, permits shared photos and rejects a different item',()=>{
+ const b=backend();productFixture(b);b.ctx.SpreadsheetApp.flush=()=>{};
+ b.tables.get('PIM_Products').push(['p2','SKU1','New request','','batch1'],['p3','OTHER','Other','','batch1']);
+ const first=b.call('revision',{id:'r1',productId:'p1',meta:{fields:{photographer:'A'}},photos:{top:[{fileId:'f0'}]}});
+ b.call('selectRevision',{productId:'p2',revisionId:'r1'});
+ assert.equal(b.tables.get('PIM_Revisions').length,1);
+ assert.throws(()=>b.call('selectRevision',{productId:'p3',revisionId:'r1'}),/Item Code/);
+ const next=b.call('revision',{id:'r2',productId:'p2',baseRevision:'r1',meta:{fields:{photographer:'B'}},photos:{top:[{fileId:'f0'}]}});
+ assert.equal(next.number,2);assert.equal(JSON.parse(b.tables.get('PIM_Revisions')[0][4]).fields.photographer,'A');
+ b.call('selectRevision',{productId:'p2',revisionId:'r1'});
+ assert.equal(b.tables.get('PIM_Selections').at(-1)[1],'r1');
+ assert.throws(()=>b.call('revision',{id:'r3',productId:'p1',baseRevision:'r1',meta:{fields:{photographer:'A'}},photos:{}}),/เวอร์ชันใหม่/);
+});
+test('stock matches complete item codes, preserves leading zero and separates companies and statuses',()=>{
+ const b=backend();const data=[['Location','Item Code','Description','Inventory\nStatus','Categories ','SUM ของ On Hand\nQty'],['A','001','Part','Good','SPARE PART','0'],['B','001','Part','Hold','SPARE PART','2'],['C','1','Other','Good','SPARE PART','99']];
+ const ss={getSheetByName:()=>({getLastRow:()=>data.length,getDataRange:()=>({getDisplayValues:()=>data})})};
+ const result=b.ctx.stock_(ss,' 001 ');assert.equal(result.rows.length,4);assert.equal(result.rows[0].qty,'0');assert.equal(result.rows[2].company,'VSP');assert.equal(result.rows[1].status,'Hold');
 });

@@ -13,7 +13,7 @@ const objectUrls=new Map();let reportUrls=[];
 function toast(message,error=false){const t=$('#toast');t.textContent=message;t.className='show'+(error?' error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.className='',6500);}
 function busy(message){$('#busy').hidden=!message;$('#busy-label').textContent=message||'';}
 async function run(fn){if(working)return toast('กำลังบันทึก กรุณารอสักครู่');working=true;document.body.setAttribute('aria-busy','true');try{await fn();}catch(e){toast(e.message||String(e),true);}finally{working=false;document.body.removeAttribute('aria-busy');busy('');updateConnection();}}
-function fmtDate(v){return v?new Date(v).toLocaleString('th-TH',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';}
+function fmtDate(v){return v?new Date(v).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'—';}
 function size(n){return n>=1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB';}
 function stamp(){return new Date().toISOString();}
 function updateConnection(){$('#connection-label').textContent=cloud.connected()?'บันทึกลง Google ได้':'Google ยังไม่เชื่อมต่อ';$('#connect-top').classList.toggle('online',cloud.connected());}

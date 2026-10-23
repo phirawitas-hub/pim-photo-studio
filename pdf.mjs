@@ -21,7 +21,7 @@ export function assemblePdf(pages){
 }
 export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{}){
  if(!products.length)throw Error('เลือกสินค้าที่มีรูปอย่างน้อย 1 รายการ');if(products.length>10)throw Error('ส่งออกครั้งละไม่เกิน 10 รายการ เพื่อให้รูปคมชัดและไม่ใช้หน่วยความจำมากเกินไป');
- const pages=[];let canvas,ctx,links,y,pageNumber=0;const generated=new Date().toLocaleString('th-TH');
+ const pages=[];let canvas,ctx,links,y,pageNumber=0;const generated=new Date().toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false});
  function font(size=24,weight=400,color=ink){ctx.font=weight+' '+size+'px '+FONT;ctx.fillStyle=color;ctx.textBaseline='top';}
  function wrap(text,maxWidth,size=24,weight=400){font(size,weight);const lines=[];for(const paragraph of String(text??'').split(/\r?\n/)){let line='';for(const ch of paragraph){if(ctx.measureText(line+ch).width>maxWidth&&line){lines.push(line);line=ch;}else line+=ch;}lines.push(line);}return lines;}
  function line(text,x,y,size=24,weight=400,color=ink){font(size,weight,color);ctx.fillText(String(text),x,y);}
@@ -38,7 +38,7 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
   start(p,'PRODUCT PHOTOGRAPHY REPORT');
   const status=count.required===7?'ถ่ายครบทั้ง 7 มุมบังคับ':'อยู่ระหว่างถ่ายภาพ';
   await block(p,'สถานะ',status+' · '+count.total+' รูป · '+count.required+'/7 มุมบังคับ'+(p.dirty||!p.syncedAt?' · ฉบับร่างในเครื่อง':''));
-  await block(p,'Revision ที่เลือก',String(p.revisionNumber||'ฉบับร่าง'));await block(p,'บันทึกลงชีตล่าสุด',p.syncedAt?new Date(p.syncedAt).toLocaleString('th-TH',{timeZone:'Asia/Bangkok'}):'ยังไม่บันทึก');
+  await block(p,'Revision ที่เลือก',String(p.revisionNumber||'ฉบับร่าง'));await block(p,'บันทึกลงชีตล่าสุด',p.syncedAt?new Date(p.syncedAt).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false}):'ยังไม่บันทึก');
   await block(p,'วัตถุประสงค์',p.purpose);for(const [key,label] of Object.entries({photographer:'ชื่อผู้ถ่าย',company:'Company',brand:'Brand',group:'Item Group',size:'Size',color:'Color',style:'Style',po:'Purchase Order (PO NO.)',lot:'Ref. Lot No.',uom:'UOM',remark:'Remark'}))await block(p,label,p.fields?.[key]);
   for(const [key,label] of [['physical','Physical Product'],['inner','Original Package (Inner)'],['outer','Original Package (Outer)'],['delivery','Delivery Package']]){const d=p.dimensions?.[key];if(d&&Object.values(d).some(v=>v!==''&&v!==null))await block(p,label,['width','length','height','net','gross'].map((k,i)=>['Width','Length','Height','Net Weight','Gross Weight'][i]+': '+(d[k]??'—')+(i<3?' cm':' kg')).join('   /   '));}
   await block(p,'รายการภาพ',ANGLES.map(a=>a.name+' · '+(p.photos?.[a.id]?.length||0)+' รูป').join('\n'));

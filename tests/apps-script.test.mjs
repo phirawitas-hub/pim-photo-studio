@@ -58,3 +58,13 @@ test('stock matches complete item codes, preserves leading zero and separates co
  const ss={getSheetByName:()=>({getLastRow:()=>data.length,getDataRange:()=>({getDisplayValues:()=>data})})};
  const result=b.ctx.stock_(ss,' 001 ');assert.equal(result.rows.length,4);assert.equal(result.rows[0].qty,'0');assert.equal(result.rows[2].company,'VSP');assert.equal(result.rows[1].status,'Hold');
 });
+
+test('Google bridge rejects untrusted origins and only answers the trusted parent',()=>{
+ const b=backend();let html='';b.ctx.HtmlService={XFrameOptionsMode:{ALLOWALL:'allow'},createHtmlOutput:s=>{html=s;return {setXFrameOptionsMode:()=>true};}};
+ const channel='a'.repeat(64);b.ctx.bridge_(channel);const script=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));
+ let handler,calls=0;const sent=[],top={postMessage:(data,origin)=>sent.push({data,origin})};const run={withSuccessHandler:fn=>{run.ok=fn;return run;},withFailureHandler:()=>run,pimCall:()=>{calls++;run.ok('ok');}};
+ vm.runInNewContext(script,{window:{top,addEventListener:(_,fn)=>handler=fn},google:{script:{run}}});
+ const data={type:'pim-request',channel,id:'request1',request:{action:'hello'}};
+ handler({origin:'https://evil.example',source:top,data});handler({origin:'https://phirawitas-hub.github.io',source:{},data});handler({origin:'https://phirawitas-hub.github.io',source:top,data:{...data,channel:'wrong'}});assert.equal(calls,0);
+ handler({origin:'https://phirawitas-hub.github.io',source:top,data});assert.equal(calls,1);assert.ok(sent.every(x=>x.origin==='https://phirawitas-hub.github.io'));
+});

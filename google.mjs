@@ -37,12 +37,13 @@ export async function syncImport(batch,products,onProgress=()=>{}){
  await syncData(batch.id);batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);
 }
 export async function saveProduct(p,onProgress=()=>{}){
- validatePhotos(p);assertSheet(p);
+ validatePhotos(p);assertSheet(p);if(!p.dirty&&p.baseRevision)return;
  const batch=await db.get('imports',p.importId);
  if(batch){assertSheet(batch);if(!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),onProgress);}
  const history=await itemHistory(p.code),latest=history.at(-1);
  if(!String(p.fields?.photographer||'').trim())throw Error('กรุณาระบุชื่อผู้ถ่าย');
  if(p.pendingRevision&&latest?.[0]===p.pendingRevision){await rpc('revision',{id:p.pendingRevision,productId:p.id});p.baseRevision=p.pendingRevision;p.itemHead=p.pendingRevision;p.revisionNumber=history.length;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
+ if(!p.itemHead&&!p.baseRevision&&latest){p.itemHead=latest[0];await db.put('products',p);}
  if((latest?.[0]||null)!==(p.itemHead||p.baseRevision||null))throw Error('มีเวอร์ชันใหม่ในชีต กรุณาตรวจประวัติก่อนบันทึก');
  for(const a of ANGLES){for(const [i,photo] of (p.photos?.[a.id]||[]).entries()){
   if(photo.fileId)continue;

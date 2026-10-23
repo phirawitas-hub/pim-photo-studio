@@ -75,6 +75,7 @@ function raw_(v) {
   // Apostrophe prevents SpreadsheetApp from evaluating imported Excel formulas.
   // getDisplayValues returns the exact original displayed text.
   if(v===null||v===undefined)return '';
+  if(v instanceof Date)return v;
   if(typeof v==='string')return v.length?'\''+v:'';
   if(typeof v==='number'||typeof v==='boolean')return v;
   throw Error('ข้อมูลเซลล์ต้องเป็นข้อความ ตัวเลข หรือค่าจริง/เท็จ');
@@ -236,7 +237,7 @@ function writeData_(ss,product,revision,cache){
  const found=ids.indexOf(product[0]),row=found<0?Math.max(2,s.getLastRow()+1):found+2;
  const values=found<0?Array(headers.length).fill(''):s.getRange(row,1,1,headers.length).getValues()[0];
  const changes={};
- if(found<0)changes['วันที่เวลานำเข้าระบบ']=imported[2];
+ if(found<0||!values[index[normData_('วันที่เวลานำเข้าระบบ')]])changes['วันที่เวลานำเข้าระบบ']=imported[2]||product[7]||'';
  const selected=table_(ss,'PIM_Selections').filter(r=>r[0]===product[0]).pop();
  changes['วันที่เวลาบันทึก']=selected?.[2]||values[index[normData_('วันที่เวลาบันทึก')]]||new Date().toISOString();
  for(const [h,v] of Object.entries(original)){const col=index[normData_(dataKey_(h))];if(found<0||values[col]==='')changes[h]=v;}
@@ -253,6 +254,16 @@ function writeData_(ss,product,revision,cache){
  const entries=Object.entries(changes).map(([h,v])=>[index[normData_(dataKey_(h))],v]).filter(([c])=>c!==undefined).sort((a,b)=>a[0]-b[0]);
  const groups=[];for(const entry of entries){const last=groups[groups.length-1];if(last&&last[last.length-1][0]+1===entry[0])last.push(entry);else groups.push([entry]);}
  for(const group of groups)s.getRange(row,group[0][0]+1,1,group.length).setValues([group.map(e=>raw_(e[1]))]);
+ // Store native date cells so sorting/filtering works; display Bangkok wall time.
+ ss.setSpreadsheetTimeZone('Asia/Bangkok');
+ for(const h of ['วันที่เวลาบันทึก','วันที่เวลานำเข้าระบบ','อัปเดตล่าสุด']){
+  const col=index[normData_(h)];if(col===undefined)continue;
+  const value=changes[h]!==undefined?changes[h]:values[col];
+  const date=value instanceof Date?value:new Date(value);
+  if(value&&!isNaN(date.getTime()))s.getRange(row,col+1).setValue(date).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+ }
+ const dateCol=index[normData_('วันที่')],requestDate=changes['วันที่']!==undefined?changes['วันที่']:values[dateCol];
+ if(dateCol!==undefined&&(requestDate instanceof Date||/^\d{4}-\d{2}-\d{2}$/.test(String(requestDate))))s.getRange(row,dateCol+1).setValue(new Date(requestDate)).setNumberFormat('dd/MM/yyyy');
  for(const [col,v] of entries)if(typeof v==='string'&&/^https:\/\/drive\.google\.com\/file\/d\/[-\w]+\/view$/.test(v))s.getRange(row,col+1).setRichTextValue(SpreadsheetApp.newRichTextValue().setText(v).setLinkUrl(v).build());
  return row;
 }

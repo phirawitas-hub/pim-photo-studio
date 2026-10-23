@@ -1,6 +1,7 @@
 // PIM Photo Studio. Deploy as a Web app with access restricted to yourself.
 // Built-in Apps Script services only; no API key, Client ID, or Advanced Services.
 const PIM_SCHEMA = {
+  PIM_Options:['Kind','Value','Active'],
   PIM_Products:['id','Item Code','Product Name','Purpose','Import ID','Source Sheet','Source Row','Created At'],
   PIM_Revisions:['id','Product ID','Updated At','Complete','Metadata JSON','Photos JSON'],
   PIM_Imports:['id','File Name','Created At','Drive File ID','Source Sheets','Products'],
@@ -19,7 +20,7 @@ function doGet(e) {
 function pimCall(request) {
   if(request && !request.sheetId)request.sheetId=PropertiesService.getScriptProperties().getProperty('PIM_SHEET_ID');
   if (!request || !/^[\w-]{15,}$/.test(request.sheetId || '')) throw Error('ระบุ Spreadsheet ID ให้ถูกต้อง');
-  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','selectRevision','itemHistory'];
+  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','selectRevision','itemHistory','workspace','option'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
   const lock=LockService.getScriptLock();
   if (!lock.tryLock(30000)) throw Error('มีงานบันทึกอยู่ กรุณาลองใหม่');
@@ -27,11 +28,13 @@ function pimCall(request) {
     const ss=SpreadsheetApp.openById(request.sheetId), p=request.payload || {};
     if (request.action==='hello') return {title:ss.getName(),sheetId:ss.getId()};
     if (request.action==='read') return table_(ss,p.name);
+    if (request.action==='workspace') return workspace_(ss);
     if (request.action==='stock') return stock_(ss,p.code);
     if (request.action==='itemHistory') return itemHistory_(ss,p.code);
     if (request.action==='photo') return photo_(ss,p.fileId);
     schema_(ss);
     switch(request.action) {
+      case 'option': return option_(ss,p);
       case 'selectRevision': return selectRevision_(ss,p);
       case 'syncData': return syncData_(ss,p);
       case 'upload': return upload_(ss,p);
@@ -299,7 +302,7 @@ function selectRevision_(ss,p){
  writeData_(ss,product,revision,{});return {revision,at};
 }
 function stock_(ss,code){
- const matches=[],warnings=[];const key=itemKey_(code);if(!key)throw Error('ระบุ Item Code');
+ const matches=[],warnings=[];const key=itemKey_(code); 
  for(const company of ['VP','VSP']){
   const name='Stock_'+company,s=ss.getSheetByName(name);if(!s){warnings.push('ไม่พบ '+name);continue;}
   if(!s.getLastRow())continue;
@@ -307,7 +310,7 @@ function stock_(ss,code){
   if(header<0){warnings.push(name+' ไม่มีหัวข้อ Item Code หรือข้อมูลยังโหลดไม่เสร็จ');continue;}
   const h=data[header].map(normData_),cols={code:h.findIndex(x=>/^(itemcode|รหัสสินค้า)$/.test(x)),location:h.findIndex(x=>x==='location'),status:h.findIndex(x=>x==='inventorystatus'),categories:h.findIndex(x=>/^categor(y|ies)$/.test(x)),qty:h.findIndex(x=>x.includes('onhandqty'))};
   if(Object.values(cols).some(i=>i<0)){warnings.push(name+' หัวคอลัมน์ไม่ครบ');continue;}
-  for(let i=header+1;i<data.length;i++){const r=data[i];if(itemKey_(r[cols.code])!==key)continue;matches.push({company,code:r[cols.code],location:r[cols.location],status:r[cols.status],categories:r[cols.categories],qty:r[cols.qty]});}
+  for(let i=header+1;i<data.length;i++){const r=data[i];if(!r[cols.code]||(key&&itemKey_(r[cols.code])!==key))continue;matches.push({company,code:r[cols.code],location:r[cols.location],status:r[cols.status],categories:r[cols.categories],qty:r[cols.qty]});}
  }
  return {rows:matches,warnings,checkedAt:new Date().toISOString()};
 }
@@ -322,4 +325,16 @@ function bridge_(channel){
  'window.addEventListener("message",e=>{if(e.origin!==origin||e.source!==window.top||e.data?.channel!==channel||e.data?.type!=="pim-request")return;const id=e.data.id;if(typeof id!=="string")return;google.script.run.withSuccessHandler(value=>window.top.postMessage({type:"pim-response",channel,id,value},origin)).withFailureHandler(error=>window.top.postMessage({type:"pim-response",channel,id,error:error.message||String(error)},origin)).pimCall(e.data.request);});'+
  'window.top.postMessage({type:"pim-ready",channel},origin);<'+ '/script>';
  return HtmlService.createHtmlOutput(html).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function workspace_(ss){
+ const s=ss.getSheetByName('Data'),rows=s&&s.getLastRow()?s.getDataRange().getDisplayValues():[],headers=rows.shift()||[],col=h=>headers.indexOf(h);
+ return {options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),imports:table_(ss,'PIM_Imports'),stock:stock_(ss,''),data:rows.map(r=>({id:r[col('PIM Product ID')],requester:r[col('ชื่อผู้ขอ')]||'',code:r[col('รหัสสินค้า')]||''})),at:new Date().toISOString()};
+}
+function option_(ss,p){
+ if(!['photographer','remark'].includes(p.kind)||!['add','remove'].includes(p.operation))throw Error('ตัวเลือกไม่ถูกต้อง');
+ const value=String(p.value||'').trim();if(!value||value.length>500)throw Error('ระบุข้อความไม่เกิน 500 ตัวอักษร');
+ const rows=table_(ss,'PIM_Options'),i=rows.findIndex(r=>r[0]===p.kind&&r[1]===value),active=p.operation==='add'?'yes':'no';
+ if(i<0)append_(ss,'PIM_Options',[[p.kind,value,active]]);else ss.getSheetByName('PIM_Options').getRange(i+2,3).setValue(active);
+ return table_(ss,'PIM_Options').filter(r=>r[2]==='yes');
 }

@@ -64,6 +64,9 @@ export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'
 export async function loadProducts(){
  const completed=new Set((await readTable('PIM_Imports')).map(r=>r[0])),rows=(await readTable('PIM_Products')).filter(r=>completed.has(r[4])),revisions=await readTable('PIM_Revisions'),selections=await readTable('PIM_Selections');
  const key=v=>String(v||'').normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase();
- return rows.map(r=>{const ids=new Set(rows.filter(x=>key(x[1])===key(r[1])).map(x=>x[0])),history=revisions.filter(x=>ids.has(x[1])),selection=selections.filter(x=>x[0]===r[0]).at(-1),rev=selection?history.find(x=>x[0]===selection[1]):history.filter(x=>x[1]===r[0]).at(-1);const p={id:r[0],code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7]};applyRevision(p,rev,history);p.syncedAt=selection?.[2]||p.syncedAt;return p;});
+ return rows.map(r=>{const ids=new Set(rows.filter(x=>key(x[1])===key(r[1])).map(x=>x[0])),history=revisions.filter(x=>ids.has(x[1])),selection=selections.filter(x=>x[0]===r[0]).at(-1),rev=selection?history.find(x=>x[0]===selection[1]):history.filter(x=>x[1]===r[0]).at(-1);const p={id:r[0],code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7]};applyRevision(p,rev,history);p.syncedAt=selection?.[2]||p.syncedAt;p.importSynced=true;return p;});
 }
 export async function photoBlob(fileId){const r=await rpc('photo',{fileId});return new Blob([Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0))],{type:r.mime});}
+
+export const workspace=()=>rpc('workspace');
+export const changeOption=(kind,value,operation)=>rpc('option',{kind,value,operation});

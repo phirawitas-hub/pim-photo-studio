@@ -24,10 +24,6 @@ export async function syncImport(batch,products,onProgress=()=>{}){
  if(imports.some(r=>r[0]===batch.id)){await syncData(batch.id);batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);return;}
  onProgress('เก็บไฟล์ต้นฉบับใน Drive ผ่าน Apps Script');
  batch.driveId=await upload(batch.file,{key:'import-'+batch.id,kind:'import',name:batch.name});await db.put('imports',batch);
- for(let s=0;s<batch.workbook.sheets.length;s++){
-  const sheet=batch.workbook.sheets[s];
-  for(let start=0;start<sheet.rows.length;start+=200){onProgress('บันทึก '+sheet.name+' · '+Math.min(start+200,sheet.rows.length)+' / '+sheet.rows.length+' แถว');await rpc('sourceRows',{batchId:batch.id,index:s,rows:sheet.rows.slice(start,start+200).filter(r=>r.cells.length)});}
- }
  const source={properties:batch.workbook.properties,sheetProperties:batch.workbook.sheetProperties,names:batch.workbook.names,sheets:batch.workbook.sheets.map(s=>({name:s.name,range:s.range,merges:s.merges,cells:s.cells}))};
  const chunks=chunkText(JSON.stringify(source));
  for(let n=0;n<chunks.length;n++)await rpc('sourceMeta',{batchId:batch.id,part:n+1,text:chunks[n]});

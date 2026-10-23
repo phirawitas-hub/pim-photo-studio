@@ -130,17 +130,7 @@ function upload_(ss,p) {
   append_(ss,'PIM_Files',[[p.key,file.getId(),p.kind,p.productId||'',p.angle||'',bytes.length,p.mime||'application/octet-stream']]);
   return file.getId();
 }
-function sourceRows_(ss,p) {
-  id_(p.batchId);
-  if(!Number.isInteger(p.index)||p.index<0||p.index>500||!Array.isArray(p.rows)||p.rows.length>200)throw Error('ช่วงข้อมูลไม่ถูกต้อง');
-  const name='IMP_'+p.batchId.replace(/-/g,'')+'_'+(p.index+1);
-  const s=ss.getSheetByName(name)||ss.insertSheet(name);
-  for(const r of p.rows) {
-    if(!Number.isInteger(r.number)||r.number<1||!Array.isArray(r.cells)||!r.cells.length||r.number*r.cells.length>2000000)throw Error('ช่วงข้อมูลเกินกำหนด');
-    grow_(s,r.number,r.cells.length);s.getRange(r.number,1,1,r.cells.length).setValues([r.cells.map(raw_)]);
-  }
-  return true;
-}
+function sourceRows_(ss,p) { id_(p.batchId); return true; }
 function products_(ss,rows) {
   if(!Array.isArray(rows)||rows.length>250)throw Error('จำนวนสินค้าเกินกำหนด');
   const existing=new Set(table_(ss,'PIM_Products').map(r=>r[0])),added=[];
@@ -328,8 +318,9 @@ function bridge_(channel){
 }
 
 function workspace_(ss){
+ cleanupLegacyImportTabs_(ss);
  const s=ss.getSheetByName('Data'),rows=s&&s.getLastRow()?s.getDataRange().getDisplayValues():[],headers=rows.shift()||[],col=h=>headers.indexOf(h);
- return {options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),imports:table_(ss,'PIM_Imports'),stock:stock_(ss,''),data:rows.map(r=>({id:r[col('PIM Product ID')],requester:r[col('ชื่อผู้ขอ')]||'',code:r[col('รหัสสินค้า')]||''})),at:new Date().toISOString()};
+ return {options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),imports:table_(ss,'PIM_Imports'),stock:stock_(ss,''),data:rows.map(r=>({id:r[col('PIM Product ID')],requester:r[col('ชื่อผู้ขอ')]||'',requestDate:r[col('วันที่')]||'',code:r[col('รหัสสินค้า')]||''})),at:new Date().toISOString()};
 }
 function option_(ss,p){
  if(!['photographer','remark'].includes(p.kind)||!['add','remove'].includes(p.operation))throw Error('ตัวเลือกไม่ถูกต้อง');
@@ -337,4 +328,10 @@ function option_(ss,p){
  const rows=table_(ss,'PIM_Options'),i=rows.findIndex(r=>r[0]===p.kind&&r[1]===value),active=p.operation==='add'?'yes':'no';
  if(i<0)append_(ss,'PIM_Options',[[p.kind,value,active]]);else ss.getSheetByName('PIM_Options').getRange(i+2,3).setValue(active);
  return table_(ss,'PIM_Options').filter(r=>r[2]==='yes');
+}
+
+function cleanupLegacyImportTabs_(ss){
+ const id='43b2b8cd-22a6-45fa-97be-e8bb1f4d3d42';
+ if(!table_(ss,'PIM_Imports').some(r=>r[0]===id)||!table_(ss,'PIM_Source').some(r=>r[0]===id))return;
+ ['IMP_43b2b8cd22a645fa97bee8bb1f4d3d42_1','IMP_43b2b8cd22a645fa97bee8bb1f4d3d42_2'].forEach(name=>{const s=ss.getSheetByName(name);if(s)ss.deleteSheet(s);});
 }

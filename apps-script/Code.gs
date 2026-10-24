@@ -1,6 +1,7 @@
 // PIM Photo Studio. Deploy as a Web app with access restricted to yourself.
 // Built-in Apps Script services only; no API key, Client ID, or Advanced Services.
 const PIM_SCHEMA = {
+  PIM_Branding:['Key','Value'],
   PIM_Options:['Kind','Value','Active'],
   PIM_Products:['id','Item Code','Product Name','Purpose','Import ID','Source Sheet','Source Row','Created At'],
   PIM_Revisions:['id','Product ID','Updated At','Complete','Metadata JSON','Photos JSON'],
@@ -20,20 +21,24 @@ function doGet(e) {
 function pimCall(request) {
   if(request && !request.sheetId)request.sheetId=PropertiesService.getScriptProperties().getProperty('PIM_SHEET_ID');
   if (!request || !/^[\w-]{15,}$/.test(request.sheetId || '')) throw Error('ระบุ Spreadsheet ID ให้ถูกต้อง');
-  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','selectRevision','itemHistory','workspace','option'];
+  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','selectRevision','itemHistory','workspace','option','snapshot','branding'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
-  const lock=LockService.getScriptLock();
-  if (!lock.tryLock(30000)) throw Error('มีงานบันทึกอยู่ กรุณาลองใหม่');
+  const readOnly=['hello','read','stock','itemHistory','photo','snapshot','workspace'].includes(request.action);
+  const lock=readOnly?null:LockService.getScriptLock();
+  if (lock&&!lock.tryLock(30000)) throw Error('มีงานบันทึกอยู่ กรุณาลองใหม่');
   try {
+    PIM_TABLE_CACHE={};
     const ss=SpreadsheetApp.openById(request.sheetId), p=request.payload || {};
     if (request.action==='hello') return {title:ss.getName(),sheetId:ss.getId()};
     if (request.action==='read') return table_(ss,p.name);
     if (request.action==='workspace') return workspace_(ss);
+    if (request.action==='snapshot') return Object.assign(workspace_(ss),{products:table_(ss,'PIM_Products'),revisions:table_(ss,'PIM_Revisions'),selections:table_(ss,'PIM_Selections')});
     if (request.action==='stock') return stock_(ss,p.code);
     if (request.action==='itemHistory') return itemHistory_(ss,p.code);
     if (request.action==='photo') return photo_(ss,p.fileId);
     schema_(ss);
     switch(request.action) {
+      case 'branding': return saveBranding_(ss,p);
       case 'option': return option_(ss,p);
       case 'selectRevision': return selectRevision_(ss,p);
       case 'syncData': return syncData_(ss,p);
@@ -52,7 +57,7 @@ function pimCall(request) {
         return true;
       case 'revision': return revision_(ss,p);
     }
-  } finally { lock.releaseLock(); }
+  } finally { if(lock)lock.releaseLock();PIM_TABLE_CACHE={}; }
 }
 function id_(value) {
   if (typeof value!=='string'||!/^[-\w]{1,120}$/.test(value)) throw Error('รหัสไม่ถูกต้อง');
@@ -69,10 +74,12 @@ function schema_(ss) {
     if (!s.getLastRow()) {s.getRange(1,1,1,PIM_SCHEMA[name].length).setValues([PIM_SCHEMA[name]]);s.setFrozenRows(1);}
   });
 }
+let PIM_TABLE_CACHE={};
 function table_(ss,name) {
+  if(PIM_TABLE_CACHE[name])return PIM_TABLE_CACHE[name];
   if (!PIM_SCHEMA[name]) throw Error('ไม่รองรับตารางนี้');
   const s=ss.getSheetByName(name); if (!s) return [];header_(s,name);
-  return s.getLastRow()<2?[]:s.getRange(2,1,s.getLastRow()-1,PIM_SCHEMA[name].length).getDisplayValues().filter(r=>r[0]);
+  return PIM_TABLE_CACHE[name]=s.getLastRow()<2?[]:s.getRange(2,1,s.getLastRow()-1,PIM_SCHEMA[name].length).getDisplayValues().filter(r=>r[0]);
 }
 function raw_(v) {
   // Apostrophe prevents SpreadsheetApp from evaluating imported Excel formulas.
@@ -89,6 +96,7 @@ function grow_(s,rows,cols) {
 }
 function append_(ss,name,rows) {
   if(!rows.length)return;
+  delete PIM_TABLE_CACHE[name];
   const s=ss.getSheetByName(name),n=PIM_SCHEMA[name].length;
   if(rows.some(r=>r.length!==n))throw Error('จำนวนคอลัมน์ไม่ถูกต้อง');
   grow_(s,s.getLastRow()+rows.length,n);
@@ -257,7 +265,8 @@ function writeData_(ss,product,revision,cache){
  }
  const dateCol=index[normData_('วันที่')],requestDate=changes['วันที่']!==undefined?changes['วันที่']:values[dateCol];
  if(dateCol!==undefined&&(requestDate instanceof Date||/^\d{4}-\d{2}-\d{2}$/.test(String(requestDate))))s.getRange(row,dateCol+1).setValue(new Date(requestDate)).setNumberFormat('dd/MM/yyyy');
- for(const [col,v] of entries)if(typeof v==='string'&&/^https:\/\/drive\.google\.com\/file\/d\/[-\w]+\/view$/.test(v))s.getRange(row,col+1).setRichTextValue(SpreadsheetApp.newRichTextValue().setText(v).setLinkUrl(v).build());
+ const linkGroups=[];for(const [col,v] of entries){if(typeof v!=='string'||!/^https:\/\/drive\.google\.com\/file\/d\/[-\w]+\/view$/.test(v))continue;const last=linkGroups.at(-1);if(last&&last.at(-1)[0]+1===col)last.push([col,v]);else linkGroups.push([[col,v]]);}
+ for(const group of linkGroups)s.getRange(row,group[0][0]+1,1,group.length).setRichTextValues([group.map(([,v])=>SpreadsheetApp.newRichTextValue().setText(v).setLinkUrl(v).build())]);
  return row;
 }
 function syncData_(ss,p){
@@ -318,20 +327,34 @@ function bridge_(channel){
 }
 
 function workspace_(ss){
- cleanupLegacyImportTabs_(ss);
+
  const s=ss.getSheetByName('Data'),rows=s&&s.getLastRow()?s.getDataRange().getDisplayValues():[],headers=rows.shift()||[],col=h=>headers.indexOf(h);
- return {options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),imports:table_(ss,'PIM_Imports'),stock:stock_(ss,''),data:rows.map(r=>({id:r[col('PIM Product ID')],requester:r[col('ชื่อผู้ขอ')]||'',requestDate:r[col('วันที่')]||'',code:r[col('รหัสสินค้า')]||''})),at:new Date().toISOString()};
+ return {branding:branding_(ss),options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),imports:table_(ss,'PIM_Imports'),stock:stock_(ss,''),data:rows.map(r=>({id:r[col('PIM Product ID')],requester:r[col('ชื่อผู้ขอ')]||'',requestDate:r[col('วันที่')]||'',code:r[col('รหัสสินค้า')]||''})),at:new Date().toISOString()};
 }
 function option_(ss,p){
  if(!['photographer','remark'].includes(p.kind)||!['add','remove'].includes(p.operation))throw Error('ตัวเลือกไม่ถูกต้อง');
  const value=String(p.value||'').trim();if(!value||value.length>500)throw Error('ระบุข้อความไม่เกิน 500 ตัวอักษร');
  const rows=table_(ss,'PIM_Options'),i=rows.findIndex(r=>r[0]===p.kind&&r[1]===value),active=p.operation==='add'?'yes':'no';
  if(i<0)append_(ss,'PIM_Options',[[p.kind,value,active]]);else ss.getSheetByName('PIM_Options').getRange(i+2,3).setValue(active);
- return table_(ss,'PIM_Options').filter(r=>r[2]==='yes');
+ delete PIM_TABLE_CACHE.PIM_Options;return table_(ss,'PIM_Options').filter(r=>r[2]==='yes');
 }
 
 function cleanupLegacyImportTabs_(ss){
  const id='43b2b8cd-22a6-45fa-97be-e8bb1f4d3d42';
  if(!table_(ss,'PIM_Imports').some(r=>r[0]===id)||!table_(ss,'PIM_Source').some(r=>r[0]===id))return;
  ['IMP_43b2b8cd22a645fa97bee8bb1f4d3d42_1','IMP_43b2b8cd22a645fa97bee8bb1f4d3d42_2'].forEach(name=>{const s=ss.getSheetByName(name);if(s)ss.deleteSheet(s);});
+}
+
+function branding_(ss){
+ const rows=table_(ss,'PIM_Branding'),get=k=>rows.find(r=>r[0]===k)?.[1]||'';
+ return {name:get('name')||'PIM.',subtitle:get('subtitle')||'PHOTO STUDIO',logo:rows.filter(r=>/^logo\d+$/.test(r[0])).sort((a,b)=>Number(a[0].slice(4))-Number(b[0].slice(4))).map(r=>r[1]).join('')};
+}
+function saveBranding_(ss,p){
+ const name=String(p.name||'').trim(),subtitle=String(p.subtitle||'').trim(),logo=String(p.logo||'');
+ if(!name||name.length>60||subtitle.length>80)throw Error('ชื่อไม่เกิน 60 ตัวอักษร และคำอธิบายไม่เกิน 80 ตัวอักษร');
+ if(logo&&(logo.length>180000||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(logo)))throw Error('ไฟล์โลโก้ไม่ถูกต้องหรือใหญ่เกินไป');
+ const rows=[['name',name],['subtitle',subtitle]];for(let i=0;i<logo.length;i+=30000)rows.push(['logo'+i/30000,logo.slice(i,i+30000)]);
+ const s=ss.getSheetByName('PIM_Branding'),old=s.getLastRow()-1;grow_(s,rows.length+1,2);
+ s.getRange(2,1,rows.length,2).setValues(rows.map(r=>r.map(raw_)));if(old>rows.length)s.getRange(rows.length+2,1,old-rows.length,2).clearContent();
+ delete PIM_TABLE_CACHE.PIM_Branding;return branding_(ss);
 }

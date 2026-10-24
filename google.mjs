@@ -11,7 +11,7 @@ function rpc(action,payload={}){
  if(!hosted())return bridgeCall(request);
  return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(e.message||String(e)))).pimCall(request));
 }
-export async function connect(c){configure(c);online=false;const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);await syncData();online=true;}
+export async function connect(c){configure(c);online=false;const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);online=true;}
 export async function syncData(batchId){let offset=0;do{const r=await rpc('syncData',{batchId,offset});offset=r.next;}while(offset!==null);}
 export async function checkConnection(){return title;}
 export async function readTable(name){return rpc('read',{name});}
@@ -57,8 +57,8 @@ export async function itemHistory(code){return rpc('itemHistory',{code});}
 export async function stock(code){return rpc('stock',{code});}
 export async function selectRevision(p,revisionId){assertSheet(p);const r=await rpc('selectRevision',{productId:p.id,revisionId});const history=await itemHistory(p.code);applyRevision(p,r.revision,history);p.syncedAt=r.at;await db.put('products',p);return p;}
 export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
-export async function loadProducts(){
- const completed=new Set((await readTable('PIM_Imports')).map(r=>r[0])),rows=(await readTable('PIM_Products')).filter(r=>completed.has(r[4])),revisions=await readTable('PIM_Revisions'),selections=await readTable('PIM_Selections');
+export async function loadProducts(snapshot){
+ const data=snapshot||await rpc('snapshot');const completed=new Set(data.imports.map(r=>r[0])),rows=data.products.filter(r=>completed.has(r[4])),revisions=data.revisions,selections=data.selections;
  const key=v=>String(v||'').normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase();
  return rows.map(r=>{const ids=new Set(rows.filter(x=>key(x[1])===key(r[1])).map(x=>x[0])),history=revisions.filter(x=>ids.has(x[1])),selection=selections.filter(x=>x[0]===r[0]).at(-1),rev=selection?history.find(x=>x[0]===selection[1]):history.filter(x=>x[1]===r[0]).at(-1);const p={id:r[0],code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7]};applyRevision(p,rev,history);p.syncedAt=selection?.[2]||p.syncedAt;p.importSynced=true;return p;});
 }
@@ -66,3 +66,6 @@ export async function photoBlob(fileId){const r=await rpc('photo',{fileId});retu
 
 export const workspace=()=>rpc('workspace');
 export const changeOption=(kind,value,operation)=>rpc('option',{kind,value,operation});
+
+export const snapshot=()=>rpc('snapshot');
+export const saveBranding=brand=>rpc('branding',brand);

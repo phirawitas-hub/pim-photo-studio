@@ -176,7 +176,7 @@ async function saveSettings(notify=true){
 }
 function exportCSV(){const rows=[['Item Code','Product Name','Purpose','Required angles','Photos','Status','Google sync'],...products.map(p=>[p.code,p.name,p.purpose,progress(p).required,progress(p).total,status(p),p.dirty?'Local draft':'Saved'])];const safe=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};const blob=new Blob(['\ufeff'+rows.map(r=>r.map(safe).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PIM-Photo-Report-'+new Date().toISOString().slice(0,10)+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||'เกิดข้อผิดพลาด กรุณาลองใหม่',true);});
-await run(async()=>{settings=await db.get('settings','config')||settings;brand=await db.get('settings','branding')||brand;applyBranding();cloud.configure(settings);await route();if(true){try{await cloud.connect(settings);updateConnection();await refreshCloud(true);if(location.hash==='#settings')renderSettings();else if(current)renderDetail();}catch(e){toast(e.message,true);}}});
+await (async()=>{settings=await db.get('settings','config')||settings;brand=await db.get('settings','branding')||brand;applyBranding();cloud.configure(settings);await route();if(true){try{await cloud.connect(settings);updateConnection();await refreshCloud(true);if(location.hash==='#settings')renderSettings();else if(current)renderDetail();}catch(e){toast(e.message,true);}}})();
 
 
 function clearReport(){for(const url of reportUrls)URL.revokeObjectURL(url);reportUrls=[];}

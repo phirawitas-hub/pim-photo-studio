@@ -1,4 +1,4 @@
-import {bridgeCall,resetBridge} from './bridge.mjs';
+import {bridgeCall,resetBridge,prepareBridge} from './bridge.mjs';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
 import * as db from './store.mjs';
 let config=null,online=false,title='';
@@ -11,7 +11,7 @@ function rpc(action,payload={}){
  if(!hosted())return bridgeCall(request);
  return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(e.message||String(e)))).pimCall(request));
 }
-export async function connect(c){configure(c);online=false;const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);online=true;}
+export async function connect(c,usePopup=false){configure(c);online=false;if(usePopup&&!hosted())await prepareBridge(true);const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);online=true;}
 export async function syncData(batchId){let offset=0;do{const r=await rpc('syncData',{batchId,offset});offset=r.next;}while(offset!==null);}
 export async function checkConnection(){return title;}
 export async function readTable(name){return rpc('read',{name});}

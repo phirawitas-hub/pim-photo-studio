@@ -323,10 +323,10 @@ function stock_(ss,code){
 function bridge_(channel){
  if(!/^[a-f0-9]{64}$/.test(channel||''))throw Error('Invalid channel');
  const origin='https://phirawitas-hub.github.io';
- const html='<!doctype html><meta charset="utf-8"><title>PIM Google connection</title><script>'+ 
- 'const channel='+JSON.stringify(channel)+',origin='+JSON.stringify(origin)+';'+
- 'window.addEventListener("message",e=>{if(e.origin!==origin||e.source!==window.top||e.data?.channel!==channel||e.data?.type!=="pim-request")return;const id=e.data.id;if(typeof id!=="string")return;google.script.run.withSuccessHandler(value=>window.top.postMessage({type:"pim-response",channel,id,value},origin)).withFailureHandler(error=>window.top.postMessage({type:"pim-response",channel,id,error:error.message||String(error)},origin)).pimCall(e.data.request);});'+
- 'window.top.postMessage({type:"pim-ready",channel},origin);<'+ '/script>';
+ const html='<!doctype html><meta charset="utf-8"><title>PIM Google connection</title><style>body{font:16px system-ui;padding:32px;line-height:1.8;color:#183e46}h2{color:#007aff}</style><h2>เชื่อมต่อ PIM Photo Studio</h2><p>กลับไปใช้งานที่แท็บ GitHub ได้เลย<br>เปิดหน้าต่างนี้ไว้ระหว่างบันทึกข้อมูล</p><script>'+ 
+ 'const channel='+JSON.stringify(channel)+',origin='+JSON.stringify(origin)+',client=window.top.opener||window.top;'+
+ 'window.addEventListener("message",e=>{if(e.origin!==origin||e.source!==client||e.data?.channel!==channel||e.data?.type!=="pim-request")return;const id=e.data.id;if(typeof id!=="string")return;google.script.run.withSuccessHandler(value=>client.postMessage({type:"pim-response",channel,id,value},origin)).withFailureHandler(error=>client.postMessage({type:"pim-response",channel,id,error:error.message||String(error)},origin)).pimCall(e.data.request);});'+
+ 'client.postMessage({type:"pim-ready",channel},origin);<'+ '/script>';
  return HtmlService.createHtmlOutput(html).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 

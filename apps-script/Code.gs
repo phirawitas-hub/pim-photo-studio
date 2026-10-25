@@ -1,6 +1,7 @@
 // PIM Photo Studio. Deploy as a Web app with access restricted to yourself.
 // Built-in Apps Script services only; no API key, Client ID, or Advanced Services.
 const PIM_SCHEMA = {
+  PIM_Deletions:['Import ID','Deleted At','File Name','Plan JSON','Status'],
   PIM_Branding:['Key','Value'],
   PIM_Options:['Kind','Value','Active'],
   PIM_Products:['id','Item Code','Product Name','Purpose','Import ID','Source Sheet','Source Row','Created At'],
@@ -21,7 +22,7 @@ function doGet(e) {
 function pimCall(request) {
   if(request && !request.sheetId)request.sheetId=PropertiesService.getScriptProperties().getProperty('PIM_SHEET_ID');
   if (!request || !/^[\w-]{15,}$/.test(request.sheetId || '')) throw Error('ระบุ Spreadsheet ID ให้ถูกต้อง');
-  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','selectRevision','itemHistory','workspace','option','snapshot','branding'];
+  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
   const readOnly=['hello','read','stock','itemHistory','photo','snapshot','workspace'].includes(request.action);
   const lock=readOnly?null:LockService.getScriptLock();
@@ -36,8 +37,11 @@ function pimCall(request) {
     if (request.action==='stock') return stock_(ss,p.code);
     if (request.action==='itemHistory') return itemHistory_(ss,p.code);
     if (request.action==='photo') return photo_(ss,p.fileId);
+    if(request.action==='deletePreview')return deletePreview_(ss,p);
     schema_(ss);
+    if(request.action!=='deleteImport')assertActiveImport_(ss,request.action,p);
     switch(request.action) {
+      case 'deleteImport':return deleteImport_(ss,p);
       case 'branding': return saveBranding_(ss,p);
       case 'option': return option_(ss,p);
       case 'selectRevision': return selectRevision_(ss,p);
@@ -329,7 +333,7 @@ function bridge_(channel){
 function workspace_(ss){
 
  const s=ss.getSheetByName('Data'),rows=s&&s.getLastRow()?s.getDataRange().getDisplayValues():[],headers=rows.shift()||[],col=h=>headers.indexOf(h);
- return {branding:branding_(ss),options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),imports:table_(ss,'PIM_Imports'),stock:stock_(ss,''),data:rows.map(r=>({id:r[col('PIM Product ID')],requester:r[col('ชื่อผู้ขอ')]||'',requestDate:r[col('วันที่')]||'',code:r[col('รหัสสินค้า')]||''})),at:new Date().toISOString()};
+ return {branding:branding_(ss),options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),deletions:table_(ss,'PIM_Deletions').map(r=>({id:r[0],name:r[2],status:r[4]})),imports:table_(ss,'PIM_Imports').filter(r=>!table_(ss,'PIM_Deletions').some(d=>d[0]===r[0])),stock:stock_(ss,''),data:rows.map(r=>({id:r[col('PIM Product ID')],requester:r[col('ชื่อผู้ขอ')]||'',requestDate:r[col('วันที่')]||'',code:r[col('รหัสสินค้า')]||''})),at:new Date().toISOString()};
 }
 function option_(ss,p){
  if(!['photographer','remark'].includes(p.kind)||!['add','remove'].includes(p.operation))throw Error('ตัวเลือกไม่ถูกต้อง');
@@ -357,4 +361,55 @@ function saveBranding_(ss,p){
  const s=ss.getSheetByName('PIM_Branding'),old=s.getLastRow()-1;grow_(s,rows.length+1,2);
  s.getRange(2,1,rows.length,2).setValues(rows.map(r=>r.map(raw_)));if(old>rows.length)s.getRange(rows.length+2,1,old-rows.length,2).clearContent();
  delete PIM_TABLE_CACHE.PIM_Branding;return branding_(ss);
+}
+
+// Deletion is resumable: journal first, preserve shared revisions, trash owned
+// files, then remove rows. A tombstone prevents offline clients restoring jobs.
+function assertActiveImport_(ss,action,p){
+ const deleted=new Set(table_(ss,'PIM_Deletions').map(r=>r[0]));if(!deleted.size)return;
+ const ids=[p.batchId];if(action==='finishImport')ids.push(p.row?.[0]);if(action==='products')for(const r of p.rows||[])ids.push(r[4]);
+ if(action==='upload'&&p.kind==='import')ids.push(String(p.key||'').replace(/^import-/,''));
+ if(p.productId)ids.push(table_(ss,'PIM_Products').find(r=>r[0]===p.productId)?.[4]);
+ if(ids.some(id=>deleted.has(id)))throw Error('ไฟล์นำเข้านี้ถูกลบแล้ว กรุณารีเฟรชข้อมูล');
+}
+function deletionPlan_(ss,batchId,batchName){
+ id_(batchId);const prior=table_(ss,'PIM_Deletions').find(r=>r[0]===batchId);
+ if(prior)return prior[4]==='complete'?{batchId,name:prior[2],complete:true}:JSON.parse(prior[3]);
+ const batch=table_(ss,'PIM_Imports').find(r=>r[0]===batchId)||[batchId,String(batchName||'').trim()];if(!batch[1]||batch[1].length>1000)throw Error('ระบุชื่อไฟล์นำเข้าให้ถูกต้อง');
+ const products=table_(ss,'PIM_Products'),owned=products.filter(r=>r[4]===batchId),ids=new Set(owned.map(r=>r[0])),others=products.filter(r=>!ids.has(r[0]));
+ const revisions=table_(ss,'PIM_Revisions'),selected=table_(ss,'PIM_Selections'),revisionMoves=[],fileMoves=[];
+ for(const rev of revisions.filter(r=>ids.has(r[1]))){
+  const consumers=selected.filter(r=>r[1]===rev[0]&&!ids.has(r[0])),target=others.find(r=>consumers.some(c=>c[0]===r[0]));
+  if(target)revisionMoves.push({id:rev[0],owner:target[0]});
+ }
+ const kept=revisions.filter(r=>!ids.has(r[1])||revisionMoves.some(m=>m.id===r[0])),used=new Map();
+ for(const rev of kept){const owner=revisionMoves.find(m=>m.id===rev[0])?.owner||rev[1];for(const list of Object.values(JSON.parse(rev[5]||'{}')))for(const ph of list)used.set(ph.fileId,owner);}
+ const candidates=table_(ss,'PIM_Files').filter(r=>ids.has(r[3])||r[0]==='import-'+batchId),trash=[];
+ for(const file of candidates){if(used.has(file[1]))fileMoves.push({id:file[1],owner:used.get(file[1])});else trash.push(file[1]);}
+ if(batch[3]&&!used.has(batch[3]))trash.push(batch[3]);
+ return {batchId,name:batch[1],productIds:[...ids],revisionMoves,fileMoves,trash:[...new Set(trash)],revisionIds:revisions.filter(r=>ids.has(r[1])&&!revisionMoves.some(m=>m.id===r[0])).map(r=>r[0])};
+}
+function deletePreview_(ss,p){const plan=deletionPlan_(ss,p.batchId,p.batchName);return {batchId:plan.batchId,name:plan.name,complete:!!plan.complete,products:plan.productIds?.length||0,files:plan.trash?.length||0,shared:plan.fileMoves?.length||0};}
+function removeRows_(ss,name,predicate){
+ const s=ss.getSheetByName(name);if(!s||s.getLastRow()<2)return;
+ const rows=s.getRange(2,1,s.getLastRow()-1,s.getLastColumn()).getDisplayValues(),groups=[];
+ rows.forEach((r,i)=>{if(!predicate(r))return;const n=i+2,last=groups.at(-1);if(last&&last.start+last.count===n)last.count++;else groups.push({start:n,count:1});});
+ groups.reverse().forEach(g=>s.deleteRows(g.start,g.count));delete PIM_TABLE_CACHE[name];
+}
+function moveOwner_(ss,name,keyCol,id,ownerCol,owner){
+ const s=ss.getSheetByName(name);if(!s||s.getLastRow()<2)return;const rows=s.getRange(2,1,s.getLastRow()-1,s.getLastColumn()).getDisplayValues(),i=rows.findIndex(r=>r[keyCol]===id);
+ if(i>=0)s.getRange(i+2,ownerCol+1).setValue(raw_(owner));delete PIM_TABLE_CACHE[name];
+}
+function deleteImport_(ss,p){
+ const plan=deletionPlan_(ss,p.batchId,p.batchName);if(p.confirmName!==plan.name)throw Error('กรอกชื่อไฟล์ให้ตรงก่อนยืนยันการลบ');if(plan.complete)return {deleted:true,batchId:p.batchId};
+ const dataCheck=ss.getSheetByName('Data');if(dataCheck&&dataCheck.getLastRow()){const headers=dataCheck.getRange(1,1,1,dataCheck.getLastColumn()).getDisplayValues()[0];if(!headers.includes('PIM Product ID')&&!headers.includes('Import ID'))throw Error('Data ไม่มีคอลัมน์ระบุงาน จึงยังไม่ลบข้อมูล');}
+ if(JSON.stringify(plan).length>45000)throw Error('งานนี้มีไฟล์มากเกินขนาดที่ลบในครั้งเดียวได้ กรุณาติดต่อผู้ดูแล');
+ if(!table_(ss,'PIM_Deletions').some(r=>r[0]===p.batchId))append_(ss,'PIM_Deletions',[[p.batchId,new Date().toISOString(),plan.name,JSON.stringify(plan),'pending']]);
+ for(const m of plan.revisionMoves)moveOwner_(ss,'PIM_Revisions',0,m.id,1,m.owner);
+ for(const m of plan.fileMoves)moveOwner_(ss,'PIM_Files',1,m.id,3,m.owner);
+ for(const fileId of plan.trash){const file=DriveApp.getFileById(fileId);if(!file.isTrashed())file.setTrashed(true);}
+ const ids=new Set(plan.productIds),revs=new Set(plan.revisionIds),files=new Set(plan.trash);
+ const data=ss.getSheetByName('Data');if(data&&data.getLastRow()){const h=data.getRange(1,1,1,data.getLastColumn()).getDisplayValues()[0],id=h.indexOf('PIM Product ID'),batch=h.indexOf('Import ID');if(id<0&&batch<0)throw Error('Data ไม่มีคอลัมน์ระบุงาน จึงยังไม่ลบข้อมูล');removeRows_(ss,'Data',r=>ids.has(r[id])||r[batch]===p.batchId);}
+ removeRows_(ss,'PIM_Selections',r=>ids.has(r[0]));removeRows_(ss,'PIM_Revisions',r=>revs.has(r[0]));removeRows_(ss,'PIM_Files',r=>files.has(r[1]));removeRows_(ss,'PIM_Source',r=>r[0]===p.batchId);removeRows_(ss,'PIM_Products',r=>ids.has(r[0]));removeRows_(ss,'PIM_Imports',r=>r[0]===p.batchId);
+ const journal=ss.getSheetByName('PIM_Deletions'),i=table_(ss,'PIM_Deletions').findIndex(r=>r[0]===p.batchId);journal.getRange(i+2,4,1,2).setValues([['{}','complete']]);delete PIM_TABLE_CACHE.PIM_Deletions;SpreadsheetApp.flush();return {deleted:true,batchId:p.batchId,files:plan.trash.length,shared:plan.fileMoves.length};
 }

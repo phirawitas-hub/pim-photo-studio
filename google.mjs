@@ -69,3 +69,6 @@ export const changeOption=(kind,value,operation)=>rpc('option',{kind,value,opera
 
 export const snapshot=()=>rpc('snapshot');
 export const saveBranding=brand=>rpc('branding',brand);
+
+export const deletePreview=(batchId,batchName)=>rpc('deletePreview',{batchId,batchName});
+export const deleteImport=(batchId,confirmName)=>rpc('deleteImport',{batchId,batchName:confirmName,confirmName});

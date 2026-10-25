@@ -5,3 +5,7 @@ export const all=name=>action(name,'readonly',s=>s.getAll());
 export const put=(name,value)=>action(name,'readwrite',s=>s.put(value));
 export const remove=(name,id)=>action(name,'readwrite',s=>s.delete(id));
 export async function commitImport(batch,products){const db=await ready;return new Promise((resolve,reject)=>{const tx=db.transaction(['imports','products'],'readwrite');tx.objectStore('imports').put(batch);for(const p of products)tx.objectStore('products').put(p);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
+
+export async function deleteBatch(batchId){
+ const connection=await ready;return new Promise((resolve,reject)=>{const tx=connection.transaction(['imports','products','assets'],'readwrite'),store=tx.objectStore('products'),read=store.getAll();read.onsuccess=()=>{const rows=read.result,keep=new Set(rows.filter(p=>p.importId!==batchId).flatMap(p=>Object.values(p.photos||{}).flat().map(ph=>ph.id)));for(const p of rows.filter(p=>p.importId===batchId)){for(const ph of Object.values(p.photos||{}).flat())if(!keep.has(ph.id))tx.objectStore('assets').delete(ph.id);store.delete(p.id);}tx.objectStore('imports').delete(batchId);};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
+}

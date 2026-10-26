@@ -19,8 +19,8 @@ window.addEventListener('message',e=>{
  if(e.data?.channel!==channel||!channel||!trustedOrigin(e.origin))return;
  if(e.data.type==='pim-ready'){
   if(peer&&e.source!==peer)return;
-  peer=e.source;peerOrigin=e.origin;lastSeen=Date.now();
-  const resolve=readyResolve;clearReady();resolve?.();return;
+  const restored=!bridgeAlive();peer=e.source;peerOrigin=e.origin;lastSeen=Date.now();
+  const resolve=readyResolve;clearReady();resolve?.();if(restored)window.dispatchEvent(new Event('pim-google-ready'));return;
  }
  if(e.source!==peer||e.origin!==peerOrigin||e.data.type!=='pim-response')return;
  lastSeen=Date.now();const p=pending.get(e.data.id);if(!p)return;pending.delete(e.data.id);clearTimeout(p.timer);
@@ -39,10 +39,10 @@ export function prepareBridge(usePopup=false){
    popupWindow=window.open(url,'pimGoogleConnection','width=520,height=420');
    if(!popupWindow){clearReady();reject(connectionError('กรุณาอนุญาตป๊อปอัปสำหรับเว็บนี้ แล้วกดเชื่อมต่อ Google อีกครั้ง'));}return;
   }
-  // First give an already-open authenticated popup time to reattach after reload.
+  // Existing popup readiness and the iframe fallback race without a startup delay.
   frameTimer=setTimeout(()=>{
    if(peer)return;frame?.remove();frame=document.createElement('iframe');frame.setAttribute('aria-hidden','true');frame.tabIndex=-1;frame.loading='eager';frame.style.cssText='position:fixed;left:-1200px;top:0;width:800px;height:600px;border:0;pointer-events:none';frame.title='เชื่อมต่อ Google ส่วนตัว';frame.src=url;document.body.append(frame);
-  },4000);
+  },0);
  });
  readyPromise=promise;promise.then(()=>{if(readyPromise===promise)readyPromise=null;},()=>{if(readyPromise===promise)readyPromise=null;});return promise;
 }

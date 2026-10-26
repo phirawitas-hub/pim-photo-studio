@@ -1,10 +1,11 @@
-import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261026auto';
+import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261026viewer';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
 import * as db from './store.mjs';
 let config=null,online=false,title='';
 export const hosted=()=>!!globalThis.google?.script?.run;
 export const connected=()=>online&&(hosted()||bridgeAlive());
 export function configure(c){config=c;}
+export function warmup(){if(!hosted())prepareBridge().catch(()=>{});}
 export function disconnect(){online=false;resetBridge();}
 function rpc(action,payload={}){
  const request={sheetId:config?.sheetId||'',action,payload};

@@ -47,3 +47,6 @@ dialog{background:var(--surface);color:var(--ink);border-radius:24px;box-shadow:
 .topbar-label{display:flex!important;align-items:center;min-width:0;gap:12px}.topbar-label b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.topbar-label>span{margin:0!important}
 @media(max-width:900px){body:not(.menu-open) #sidebar{width:56px!important;transform:none;overflow:hidden}body:not(.menu-open) #sidebar>:not(#sidebar-toggle){display:none}body:not(.menu-open) #sidebar-toggle{right:12px;top:16px}.shell{margin-left:56px!important}.topbar-label{font-size:12px;gap:7px}.topbar{padding-left:14px;padding-right:14px}}
 @media(max-width:560px){.topbar-label{font-size:0;gap:0}.topbar-label>span{display:none}.topbar-label b{font-size:13px}}
+
+/* Hide connection recovery once the authenticated channel is available. */
+#google-recovery[hidden]{display:none!important}

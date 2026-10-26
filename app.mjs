@@ -3,7 +3,7 @@ initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs';
 import * as db from './store.mjs';
-import * as cloud from './google.mjs';
+import * as cloud from './google.mjs?v=20261025b';
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
 const paths={grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',camera:'M4 6h4l2-3h5l2 3h3v15H4z M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',import:'M12 3v12 m-5-5 5 5 5-5 M4 15v6h16v-6',export:'M12 16V3 m-5 5 5-5 5 5 M4 15v6h16v-6',settings:'M9 3h6l1 4 4 1v7l-4 1-1 4H9l-1-4-4-1V8l4-1z M15 11.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0',menu:'M5 6h14 M5 12h10 M5 18h14',search:'M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0 M15 15l6 6',check:'m5 12 4 4L19 6',clock:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 7v5l3 2',refresh:'M20 7a9 9 0 1 0 1 8 M20 3v5h-5',arrow:'M5 12h14 m-5-5 5 5-5 5',back:'M19 12H5 m5-5-5 5 5 5',image:'M3 3h18v18H3z m0 14 6-6 4 4 3-3 5 5 M15 7h.01',cloud:'M7 19H5a4 4 0 0 1-1-8 7 7 0 0 1 14-2 5 5 0 0 1 1 10h-2 M12 21V11 m-4 4 4-4 4 4',file:'M6 2h8l5 5v15H6z M14 2v6h5 M9 12h7 M9 16h7',close:'m6 6 12 12 M6 18 18 6',link:'m10 13 4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M13 7l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0',info:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 11v6 M12 7v.01',box:'m12 3 9 5v9l-9 5-9-5V8z M3 8l9 5 9-5 M12 13v9 M7 5l10 6'};
 function icon(name){return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.box}"/></svg>`;}

@@ -39,6 +39,8 @@ export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl}){
  q('#viewer-angle').onchange=e=>{items=e.target.value?all.filter(p=>p.angle===e.target.value):all;thumbnails();show(0);};
  function keydown(e){if(e.target.matches('select,input,textarea'))return;if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();show(index+(e.key==='ArrowLeft'?-1:1));}}
  modal.addEventListener('keydown',keydown);
- modal.addEventListener('close',()=>{closed=true;sequence++;modal.classList.remove('photo-viewer-modal');modal.removeEventListener('keydown',keydown);},{once:true});
+ function connected(){if(!closed&&!message.hidden)show(index);}
+ window.addEventListener('pim-cloud-connected',connected);
+ modal.addEventListener('close',()=>{closed=true;sequence++;modal.classList.remove('photo-viewer-modal');modal.removeEventListener('keydown',keydown);window.removeEventListener('pim-cloud-connected',connected);},{once:true});
  thumbnails();show(0);
 }

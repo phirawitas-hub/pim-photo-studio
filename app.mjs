@@ -3,7 +3,7 @@ initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs';
 import * as db from './store.mjs';
-import * as cloud from './google.mjs?v=20261026connect';
+import * as cloud from './google.mjs?v=20261026auto';
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
 const paths={grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',camera:'M4 6h4l2-3h5l2 3h3v15H4z M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',import:'M12 3v12 m-5-5 5 5 5-5 M4 15v6h16v-6',export:'M12 16V3 m-5 5 5-5 5 5 M4 15v6h16v-6',settings:'M9 3h6l1 4 4 1v7l-4 1-1 4H9l-1-4-4-1V8l4-1z M15 11.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0',menu:'M5 6h14 M5 12h10 M5 18h14',search:'M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0 M15 15l6 6',check:'m5 12 4 4L19 6',clock:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 7v5l3 2',refresh:'M20 7a9 9 0 1 0 1 8 M20 3v5h-5',arrow:'M5 12h14 m-5-5 5 5-5 5',back:'M19 12H5 m5-5-5 5 5 5',image:'M3 3h18v18H3z m0 14 6-6 4 4 3-3 5 5 M15 7h.01',cloud:'M7 19H5a4 4 0 0 1-1-8 7 7 0 0 1 14-2 5 5 0 0 1 1 10h-2 M12 21V11 m-4 4 4-4 4 4',file:'M6 2h8l5 5v15H6z M14 2v6h5 M9 12h7 M9 16h7',close:'m6 6 12 12 M6 18 18 6',link:'m10 13 4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M13 7l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0',info:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 11v6 M12 7v.01',box:'m12 3 9 5v9l-9 5-9-5V8z M3 8l9 5 9-5 M12 13v9 M7 5l10 6'};
 function icon(name){return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.box}"/></svg>`;}
@@ -19,7 +19,7 @@ async function run(fn){if(working)return toast('กำลังบันทึ�
 function fmtDate(v){return v?new Date(v).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'—';}
 function size(n){return n>=1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB';}
 function stamp(){return new Date().toISOString();}
-function updateConnection(){$('#connection-label').textContent=cloud.connected()?'บันทึกลง Google ได้':'Google ยังไม่เชื่อมต่อ';$('#connect-top').classList.toggle('online',cloud.connected());}
+function updateConnection(){const ok=cloud.connected();$('#connection-label').textContent=ok?'บันทึกลง Google ได้':(autoConnecting?'กำลังเชื่อมต่อ Google':'Google ยังไม่เชื่อมต่อ');$('#connect-top').classList.toggle('online',ok);const badge=$('#google-state');if(badge){badge.textContent=ok?'เชื่อมต่อแล้ว':(autoConnecting?'กำลังเชื่อมต่อ':'รอเชื่อมต่ออัตโนมัติ');badge.className='badge '+(ok?'complete':'neutral');}const recovery=$('#google-recovery');if(recovery)recovery.hidden=ok;}
 function title(eyebrow,heading,sub,actions=''){return `<div class="page-heading"><div><p class="eyebrow">${eyebrow}</p><h1>${heading}</h1><p class="subtext">${sub}</p></div><div class="actions">${actions}</div></div>`;}
 function badge(p){const s=status(p);return `<span class="badge ${s}">${s==='complete'?icon('check'):''}${{waiting:'รอถ่ายรูป',progress:'กำลังดำเนินการ',complete:'ถ่ายครบแล้ว'}[s]}</span>`;}
 function closeModal(){modal.close();stopCamera();importState=null;}
@@ -171,7 +171,7 @@ function renderImports(){
  main.querySelectorAll('[data-sync-import]').forEach(b=>b.onclick=()=>run(async()=>{if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ก่อน');const batch=batches.find(x=>x.id===b.dataset.syncImport);await cloud.syncImport(batch,products.filter(x=>x.importId===batch.id),busy);await reloadLocal();renderImports();toast('บันทึกไฟล์ต้นฉบับและข้อมูลทุกแท็บสำเร็จ');}));
 }
 function renderSettings(){
- main.innerHTML=title('WORKSPACE SETTINGS','การตั้งค่า','ข้อมูลสินค้าใน Google Sheets · รูปภาพใน Google Drive')+brandingPanel()+'<section class="panel"><div class="panel-head"><h2>Google Workspace</h2><span class="badge '+(cloud.connected()?'complete':'neutral')+'">'+(cloud.connected()?'เชื่อมต่อแล้ว':'ยังไม่เชื่อมต่อ')+'</span></div><div class="panel-body"><p>เชื่อม Google ผ่านหน้าต่างแยก เพื่อให้เว็บ GitHub เข้าถึงชีตและรูปของคุณได้</p><p class="help">Google ยังจำเป็นสำหรับบันทึก Data อ่านสต็อก และเก็บรูป ส่วนการถ่ายฉบับร่างทำในเครื่องได้</p><div class="actions"><button id="connect-popup" class="primary">เชื่อมต่อ Google</button><a class="text-link" href="'+esc(SCRIPT_URL)+'" target="_blank" rel="noopener">เข้าสู่ระบบ Google เพื่อเชื่อมต่อ</a></div><p class="help">กด “เชื่อมต่อ Google” และใช้บัญชีที่มีสิทธิ์เข้าถึง Apps Script · เปิดหน้าต่าง Google นี้ค้างไว้ระหว่างใช้งาน (ย่อได้) · หากหน้าต่างไม่เปิด ให้อนุญาตป๊อปอัปสำหรับเว็บนี้ แล้วกดอีกครั้ง หากรีโหลดเว็บแล้วไม่เชื่อมต่อ ให้กดปุ่มนี้ใหม่</p><div class="divider"></div><label class="field">ชื่อผู้ถ่ายเริ่มต้น<input id="default-photographer" value="'+esc(settings.photographer||'')+'" placeholder="ชื่อผู้ถ่ายสำหรับงานใหม่"></label><div class="actions" style="margin-top:16px"><button id="backup-drafts">ส่งออกฉบับร่างทั้งหมด</button><button id="restore-drafts">นำเข้าฉบับร่าง</button><button id="paste-drafts">วางข้อมูลฉบับร่าง</button><input id="draft-file" type="file" accept=".json" hidden></div></div></section>';
+ main.innerHTML=title('WORKSPACE SETTINGS','การตั้งค่า','ข้อมูลสินค้าใน Google Sheets · รูปภาพใน Google Drive')+brandingPanel()+'<section class="panel"><div class="panel-head"><h2>Google Workspace</h2><span id="google-state" class="badge '+(cloud.connected()?'complete':'neutral')+'">'+(cloud.connected()?'เชื่อมต่อแล้ว':'ยังไม่เชื่อมต่อ')+'</span></div><div class="panel-body"><p>เชื่อม Google ผ่านหน้าต่างแยก เพื่อให้เว็บ GitHub เข้าถึงชีตและรูปของคุณได้</p><p class="help">Google ยังจำเป็นสำหรับบันทึก Data อ่านสต็อก และเก็บรูป ส่วนการถ่ายฉบับร่างทำในเครื่องได้</p><div id="google-recovery" class="actions" '+(cloud.connected()?'hidden':'')+'><button id="connect-popup" class="primary">เชื่อมต่อ Google</button><a class="text-link" href="'+esc(SCRIPT_URL)+'" target="_blank" rel="noopener">เข้าสู่ระบบ Google เพื่อเชื่อมต่อ</a></div><p class="help">กด “เชื่อมต่อ Google” และใช้บัญชีที่มีสิทธิ์เข้าถึง Apps Script · เปิดหน้าต่าง Google นี้ค้างไว้ระหว่างใช้งาน (ย่อได้) · หากหน้าต่างไม่เปิด ให้อนุญาตป๊อปอัปสำหรับเว็บนี้ แล้วกดอีกครั้ง หลังเชื่อมครั้งแรก ระบบจะจำการเชื่อมต่อในแท็บนี้และเชื่อมกลับเองหลังรีโหลดหรืออินเทอร์เน็ตกลับมา หากปิดหน้าต่าง Google หรือออกจากบัญชี อาจต้องกดเชื่อมใหม่</p><div class="divider"></div><label class="field">ชื่อผู้ถ่ายเริ่มต้น<input id="default-photographer" value="'+esc(settings.photographer||'')+'" placeholder="ชื่อผู้ถ่ายสำหรับงานใหม่"></label><div class="actions" style="margin-top:16px"><button id="backup-drafts">ส่งออกฉบับร่างทั้งหมด</button><button id="restore-drafts">นำเข้าฉบับร่าง</button><button id="paste-drafts">วางข้อมูลฉบับร่าง</button><input id="draft-file" type="file" accept=".json" hidden></div></div></section>';
  bindBranding();$('#connect-popup').onclick=()=>run(()=>signIn(true));$('#default-photographer').onchange=()=>run(async()=>{settings.photographer=$('#default-photographer').value.trim();await db.put('settings',settings);toast('บันทึกชื่อผู้ถ่ายเริ่มต้นแล้ว');});
  $('#backup-drafts').onclick=()=>run(async()=>{busy('กำลังส่งออกฉบับร่าง');const {exportDrafts}=await import('./transfer.mjs');await exportDrafts();});
  $('#restore-drafts').onclick=()=>$('#draft-file').click();
@@ -186,7 +186,14 @@ async function saveSettings(notify=true){
 }
 function exportCSV(){const rows=[['Item Code','Product Name','Purpose','Required angles','Photos','Status','Google sync'],...products.map(p=>[p.code,p.name,p.purpose,progress(p).required,progress(p).total,status(p),p.dirty?'Local draft':'Saved'])];const safe=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};const blob=new Blob(['\ufeff'+rows.map(r=>r.map(safe).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='PIM-Photo-Report-'+new Date().toISOString().slice(0,10)+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||'เกิดข้อผิดพลาด กรุณาลองใหม่',true);});
-await (async()=>{settings=await db.get('settings','config')||settings;brand=await db.get('settings','branding')||brand;workspace=await db.get('settings','workspace-cache')||workspace;lastSync=workspace.at||'';applyBranding();cloud.configure(settings);await route();if(true){try{await cloud.connect(settings);updateConnection();await refreshCloud(true);if(location.hash==='#settings')renderSettings();else if(current)renderDetail();}catch(e){updateConnection();if(location.hash==='#settings')renderSettings();toast('ยังเชื่อมอัตโนมัติไม่ได้ ไปที่การตั้งค่า แล้วกด “เชื่อมต่อ Google”');}}})();
+let autoConnecting=false,appReady=false,lastAutoAttempt=0;
+async function autoSync(){
+ if(!appReady||autoConnecting||working||modal.open||document.hidden)return;
+ const reconnect=!cloud.connected();if(reconnect&&Date.now()-lastAutoAttempt<15000)return;
+ autoConnecting=true;lastAutoAttempt=Date.now();updateConnection();
+ try{if(reconnect)await cloud.connect(settings);await refreshCloud(true);}catch{}finally{autoConnecting=false;updateConnection();}
+}
+await (async()=>{settings=await db.get('settings','config')||settings;brand=await db.get('settings','branding')||brand;workspace=await db.get('settings','workspace-cache')||workspace;lastSync=workspace.at||'';applyBranding();cloud.configure(settings);await route();appReady=true;await autoSync();})();
 
 
 function clearReport(){for(const url of reportUrls)URL.revokeObjectURL(url);reportUrls=[];}
@@ -216,8 +223,10 @@ function renderSummary(){
  main.querySelectorAll('[data-summary]').forEach(el=>el.onchange=()=>{summaryFilter[el.dataset.summary]=el.value;renderSummary();});$('#reset-summary').onclick=()=>{summaryFilter={file:'',requester:'',status:'',from:'',to:'',date:'import'};renderSummary();};
 }
 
-setInterval(()=>{if(!document.hidden&&!working&&!modal.open)refreshCloud(true).catch(e=>toast('ซิงก์อัตโนมัติไม่สำเร็จ: '+e.message,true));},60000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!working)refreshCloud(true).catch(e=>toast(e.message,true));});
+setInterval(autoSync,60000);
+setInterval(()=>{if(appReady)updateConnection();},5000);
+window.addEventListener('online',()=>{lastAutoAttempt=0;autoSync();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)autoSync();});
 
 async function hydrateListPhotos(){for(const img of main.querySelectorAll('[data-list-product]')){const p=products.find(p=>p.id===img.dataset.listProduct),photo=p?.photos?.top?.[0];if(!photo)continue;try{const url=await photoUrl(photo);if(img.isConnected&&url)img.src=url;}catch{if(img.isConnected)img.alt='โหลดภาพไม่สำเร็จ';}}}
 

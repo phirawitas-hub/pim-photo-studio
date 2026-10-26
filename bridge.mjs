@@ -1,16 +1,55 @@
 import {SCRIPT_URL} from './deployment.mjs';
-let frame,popupWindow,peer,peerOrigin,readyPromise,readyTimer,readyListener,readyReject;const pending=new Map();
+const KEY='pim-google-channel';
+const trustedOrigin=o=>/^https:\/\/[a-z0-9-]+(?:\.script|-script)\.googleusercontent\.com$/.test(o);
+let frame,popupWindow,peer,peerOrigin,readyPromise,readyTimer,frameTimer,readyResolve,readyReject,lastSeen=0;
+const pending=new Map();
 let channel='';
-export function resetBridge(){clearTimeout(readyTimer);if(readyListener)window.removeEventListener('message',readyListener);readyReject?.(Error('การเชื่อมต่อถูกรีเซ็ต'));readyReject=null;frame?.remove();popupWindow?.close();popupWindow=null;frame=null;peer=null;readyPromise=null;for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('การเชื่อมต่อถูกรีเซ็ต'));}pending.clear();}
-export function prepareBridge(usePopup=false){
- if(readyPromise)return readyPromise;
- if(location.origin!=='https://phirawitas-hub.github.io')return Promise.reject(Error('การเชื่อม Google ใช้ได้จากเว็บ GitHub ที่ตั้งค่าไว้เท่านั้น'));
- channel=Array.from(crypto.getRandomValues(new Uint8Array(32)),n=>n.toString(16).padStart(2,'0')).join('');
- readyPromise=new Promise((resolve,reject)=>{
-  readyReject=reject;const timer=readyTimer=setTimeout(()=>{readyReject=null;window.removeEventListener('message',readyListener);readyPromise=null;frame?.remove();reject(Error(usePopup?'เชื่อม Google ไม่สำเร็จ ตรวจบัญชีในหน้าต่าง Google แล้วกดเชื่อมต่อใหม่':'เชื่อมอัตโนมัติไม่ได้ กรุณาไปที่การตั้งค่า แล้วกด “เชื่อมต่อ Google”'));},usePopup?90000:12000);
-  const ready=readyListener=e=>{if(e.data?.channel!==channel||e.data?.type!=='pim-ready'||!/^https:\/\/[a-z0-9-]+\.script\.googleusercontent\.com$|^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/.test(e.origin))return;peer=e.source;peerOrigin=e.origin;clearTimeout(timer);readyReject=null;window.removeEventListener('message',ready);resolve();};
-  window.addEventListener('message',ready);if(usePopup){popupWindow=window.open(SCRIPT_URL+'?bridge=1&channel='+channel,'pimGoogleConnection','width=520,height=420');if(!popupWindow){clearTimeout(timer);window.removeEventListener('message',ready);readyReject=null;reject(Error('กรุณาอนุญาตหน้าต่างป๊อปอัปสำหรับเว็บนี้แล้วลองอีกครั้ง'));}return;}frame=document.createElement('iframe');frame.setAttribute('aria-hidden','true');frame.tabIndex=-1;frame.loading='eager';frame.style.cssText='position:fixed;left:-1200px;top:0;width:800px;height:600px;border:0;pointer-events:none';frame.title='เชื่อมต่อ Google ส่วนตัว';frame.src=SCRIPT_URL+'?bridge=1&channel='+channel;document.body.append(frame);
- });return readyPromise;
+try{channel=sessionStorage.getItem(KEY)||'';}catch{}
+if(!/^[a-f0-9]{64}$/.test(channel))channel='';
+const connectionError=message=>Object.assign(Error(message),{code:'CONNECTION'});
+export const bridgeAlive=()=>!!peer&&Date.now()-lastSeen<150000&&(!popupWindow||!popupWindow.closed);
+function clearReady(){clearTimeout(readyTimer);clearTimeout(frameTimer);readyResolve=null;readyReject=null;}
+export function resetBridge(){
+ const reject=readyReject;clearReady();reject?.(connectionError('การเชื่อมต่อถูกรีเซ็ต'));
+ frame?.remove();popupWindow?.close();popupWindow=null;frame=null;peer=null;peerOrigin=null;lastSeen=0;readyPromise=null;
+ for(const p of pending.values()){clearTimeout(p.timer);p.reject(connectionError('การเชื่อมต่อถูกรีเซ็ต'));}pending.clear();
 }
-window.addEventListener('message',e=>{if(e.source!==peer||e.origin!==peerOrigin||e.data?.channel!==channel||e.data?.type!=='pim-response')return;const p=pending.get(e.data.id);if(!p)return;pending.delete(e.data.id);clearTimeout(p.timer);e.data.error?p.reject(Error(e.data.error)):p.resolve(e.data.value);});
-export async function bridgeCall(request){await prepareBridge();return new Promise((resolve,reject)=>{const id=crypto.randomUUID(),timer=setTimeout(()=>{pending.delete(id);reject(Error('Google ใช้เวลาตอบนาน กรุณาลองอีกครั้ง ข้อมูลฉบับร่างยังอยู่'));},180000);pending.set(id,{resolve,reject,timer});peer.postMessage({type:'pim-request',channel,id,request},peerOrigin);});}
+function rememberChannel(){if(!channel)channel=Array.from(crypto.getRandomValues(new Uint8Array(32)),n=>n.toString(16).padStart(2,'0')).join('');try{sessionStorage.setItem(KEY,channel);}catch{}}
+window.addEventListener('message',e=>{
+ if(e.data?.channel!==channel||!channel||!trustedOrigin(e.origin))return;
+ if(e.data.type==='pim-ready'){
+  if(peer&&e.source!==peer)return;
+  peer=e.source;peerOrigin=e.origin;lastSeen=Date.now();
+  const resolve=readyResolve;clearReady();resolve?.();return;
+ }
+ if(e.source!==peer||e.origin!==peerOrigin||e.data.type!=='pim-response')return;
+ lastSeen=Date.now();const p=pending.get(e.data.id);if(!p)return;pending.delete(e.data.id);clearTimeout(p.timer);
+ e.data.error?p.reject(Error(e.data.error)):p.resolve(e.data.value);
+});
+export function prepareBridge(usePopup=false){
+ if(bridgeAlive())return Promise.resolve();
+ if(readyPromise)return readyPromise;
+ if(location.origin!=='https://phirawitas-hub.github.io')return Promise.reject(connectionError('การเชื่อม Google ใช้ได้จากเว็บ GitHub ที่ตั้งค่าไว้เท่านั้น'));
+ peer=null;peerOrigin=null;rememberChannel();
+ const promise=new Promise((resolve,reject)=>{
+  readyResolve=resolve;readyReject=reject;
+  readyTimer=setTimeout(()=>{clearReady();frame?.remove();frame=null;reject(connectionError('ยังเชื่อม Google ไม่ได้ ระบบจะลองใหม่อัตโนมัติ หรือกดเชื่อมต่อในหน้าตั้งค่า'));},usePopup?90000:12000);
+  const url=SCRIPT_URL+'?bridge=1&channel='+channel;
+  if(usePopup){
+   popupWindow=window.open(url,'pimGoogleConnection','width=520,height=420');
+   if(!popupWindow){clearReady();reject(connectionError('กรุณาอนุญาตป๊อปอัปสำหรับเว็บนี้ แล้วกดเชื่อมต่อ Google อีกครั้ง'));}return;
+  }
+  // First give an already-open authenticated popup time to reattach after reload.
+  frameTimer=setTimeout(()=>{
+   if(peer)return;frame?.remove();frame=document.createElement('iframe');frame.setAttribute('aria-hidden','true');frame.tabIndex=-1;frame.loading='eager';frame.style.cssText='position:fixed;left:-1200px;top:0;width:800px;height:600px;border:0;pointer-events:none';frame.title='เชื่อมต่อ Google ส่วนตัว';frame.src=url;document.body.append(frame);
+  },4000);
+ });
+ readyPromise=promise;promise.then(()=>{if(readyPromise===promise)readyPromise=null;},()=>{if(readyPromise===promise)readyPromise=null;});return promise;
+}
+export async function bridgeCall(request){
+ await prepareBridge();return new Promise((resolve,reject)=>{
+  const id=crypto.randomUUID(),timer=setTimeout(()=>{pending.delete(id);peer=null;reject(connectionError('Google ใช้เวลาตอบนาน ระบบจะเชื่อมกลับอัตโนมัติ ข้อมูลฉบับร่างยังอยู่'));},180000);
+  pending.set(id,{resolve,reject,timer});
+  try{peer.postMessage({type:'pim-request',channel,id,request},peerOrigin);}catch{clearTimeout(timer);pending.delete(id);peer=null;reject(connectionError('การเชื่อมต่อขาดชั่วคราว ระบบจะลองใหม่'));}
+ });
+}

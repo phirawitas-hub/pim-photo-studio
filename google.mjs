@@ -1,14 +1,14 @@
-import {bridgeCall,resetBridge,prepareBridge} from './bridge.mjs?v=20261026connect';
+import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261026auto';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
 import * as db from './store.mjs';
 let config=null,online=false,title='';
 export const hosted=()=>!!globalThis.google?.script?.run;
-export const connected=()=>online;
+export const connected=()=>online&&(hosted()||bridgeAlive());
 export function configure(c){config=c;}
 export function disconnect(){online=false;resetBridge();}
 function rpc(action,payload={}){
  const request={sheetId:config?.sheetId||'',action,payload};
- if(!hosted())return bridgeCall(request);
+ if(!hosted())return bridgeCall(request).catch(e=>{if(e.code==='CONNECTION')online=false;throw e;});
  return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(e.message||String(e)))).pimCall(request));
 }
 export async function connect(c,usePopup=false){configure(c);online=false;if(usePopup&&!hosted())await prepareBridge(true);const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);online=true;}

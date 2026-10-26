@@ -1,4 +1,4 @@
-import {bridgeCall,resetBridge,prepareBridge} from './bridge.mjs?v=20261025b';
+import {bridgeCall,resetBridge,prepareBridge} from './bridge.mjs?v=20261026connect';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
 import * as db from './store.mjs';
 let config=null,online=false,title='';

@@ -33,9 +33,12 @@ jobs:
           npm test
       - name: Prepare public files
         run: |
-          mkdir -p public/vendor
+          mkdir -p public/vendor public/icons public/assets
           cp index.html styles.css favicon.svg .nojekyll *.mjs parse-worker.js public/
           cp vendor/xlsx.full.min.js vendor/LICENSE public/vendor/
+          cp manifest.webmanifest public/
+          cp icons/*.png public/icons/
+          cp assets/*.webp public/assets/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

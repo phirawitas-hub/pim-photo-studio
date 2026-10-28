@@ -82,3 +82,12 @@ dialog.photo-viewer-modal{width:min(1080px,calc(100vw - 32px));max-width:none;ma
 @media(max-width:1400px){.product-filters{grid-template-columns:repeat(4,minmax(130px,1fr))}.product-filters>.field:nth-child(-n+2){grid-column:span 2}.product-filters .filter-reset,.product-filters .danger{width:100%}}
 @media(max-width:900px){.product-filters{grid-template-columns:1fr 1fr!important}}
 @media(max-width:600px){.product-filters{grid-template-columns:1fr 1fr!important}.product-filters>.field:nth-child(-n+2){grid-column:1/-1}.topbar{flex-wrap:wrap}.install-app{font-size:11px;padding:7px 9px}.product-filters input[type=date]{min-width:0;font-size:12px}}
+
+/* Distinct product filter group, with visible fields in both themes. */
+.product-filters{margin:8px 24px 24px;padding:18px!important;border:1.5px solid color-mix(in srgb,var(--teal) 42%,var(--line));border-radius:18px;background:color-mix(in srgb,var(--teal) 5%,var(--surface));box-shadow:0 3px 12px #007aff08}
+.product-filters .field{color:var(--ink);font-weight:600}
+.product-filters input,.product-filters select{background:var(--surface);border:1px solid color-mix(in srgb,var(--muted) 48%,var(--line));border-radius:11px;font-weight:400;transition:border-color .15s,box-shadow .15s}
+.product-filters input:hover,.product-filters select:hover{border-color:var(--teal)}
+.product-filters input:focus,.product-filters select:focus{border-color:var(--teal);outline:2px solid color-mix(in srgb,var(--teal) 28%,transparent);outline-offset:2px;box-shadow:0 0 0 3px color-mix(in srgb,var(--teal) 10%,transparent)}
+.product-filters input[type=date]{color-scheme:inherit}
+@media(max-width:600px){.product-filters{margin:8px 14px 18px;padding:14px!important;gap:12px;border-radius:15px}}

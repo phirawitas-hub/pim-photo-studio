@@ -3,7 +3,7 @@ export function viewerPhotos(product){
  return ANGLES.flatMap(angle=>(product.photos?.[angle.id]||[]).map((photo,index)=>({photo,angle:angle.id,label:angle.name+' '+(index+1),thai:angle.thai})));
 }
 export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl}){
- const all=viewerPhotos(product);let items=all,index=0,sequence=0,closed=false;
+ const all=viewerPhotos(product);let items=all,index=0,sequence=0,closed=false,thumbnailGeneration=0;
  if(!all.length)return;
  openModal(modalHeader('ดูรูป · '+product.code)+
  '<div class="photo-viewer"><div class="viewer-info"><div><strong>'+esc(product.name)+'</strong><p>Revision '+esc(product.revisionNumber||'ฉบับร่าง')+(product.dirty?' · มีฉบับร่างที่ยังไม่บันทึก':'')+' · โหมดดูรูป</p></div><label>มุมภาพ<select id="viewer-angle"><option value="">ทุกมุม · '+all.length+' รูป</option>'+ANGLES.filter(a=>all.some(p=>p.angle===a.id)).map(a=>'<option value="'+a.id+'">'+esc(a.name)+'</option>').join('')+'</select></label></div>'+
@@ -31,15 +31,21 @@ export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl}){
    const thumb=q('[data-viewer-index="'+index+'"] img');if(thumb){thumb.src=url;thumb.hidden=false;}
   }catch(e){if(closed||ticket!==sequence)return;setMessage('โหลดภาพไม่สำเร็จ: '+(e.message||'กรุณาลองอีกครั้ง'));retry.hidden=false;}
  }
+ async function loadThumbnails(){
+  const generation=++thumbnailGeneration,buttons=[...modal.querySelectorAll('[data-viewer-index]')],list=[...items];let cursor=0;
+  async function worker(){while(cursor<list.length&&!closed&&generation===thumbnailGeneration){const i=cursor++,button=buttons[i],thumb=button.querySelector('img'),placeholder=button.querySelector('.viewer-thumb>span');try{const url=await photoUrl(list[i].photo);if(closed||generation!==thumbnailGeneration||!button.isConnected)return;if(url){thumb.onload=()=>{if(button.isConnected){thumb.hidden=false;placeholder.hidden=true;}};thumb.onerror=()=>{placeholder.textContent='โหลดไม่ได้';thumb.hidden=true;};thumb.src=url;}else{placeholder.textContent='รอ Google';button.title='เชื่อมต่อ Google เพื่อโหลดภาพ';}}catch{if(button.isConnected){placeholder.textContent='โหลดไม่ได้';button.title='โหลดภาพไม่สำเร็จ กรุณาลองใหม่';}}}}
+  await Promise.all(Array.from({length:Math.min(3,list.length)},worker));
+ }
  function thumbnails(){
   q('#viewer-thumbnails').innerHTML=items.map((item,i)=>'<button data-viewer-index="'+i+'" aria-label="'+esc(item.label)+'" aria-pressed="false"><span class="viewer-thumb"><img alt="" hidden><span>'+String(i+1).padStart(2,'0')+'</span></span><small>'+esc(item.label)+'</small></button>').join('');
   modal.querySelectorAll('[data-viewer-index]').forEach(b=>b.onclick=()=>show(Number(b.dataset.viewerIndex)));
+  loadThumbnails();
  }
- q('#viewer-prev').onclick=()=>show(index-1);q('#viewer-next').onclick=()=>show(index+1);retry.onclick=()=>show(index);
+ q('#viewer-prev').onclick=()=>show(index-1);q('#viewer-next').onclick=()=>show(index+1);retry.onclick=()=>{show(index);loadThumbnails();};
  q('#viewer-angle').onchange=e=>{items=e.target.value?all.filter(p=>p.angle===e.target.value):all;thumbnails();show(0);};
  function keydown(e){if(e.target.matches('select,input,textarea'))return;if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();show(index+(e.key==='ArrowLeft'?-1:1));}}
  modal.addEventListener('keydown',keydown);
- function connected(){if(!closed&&!message.hidden)show(index);}
+ function connected(){if(closed)return;loadThumbnails();if(!message.hidden)show(index);}
  window.addEventListener('pim-cloud-connected',connected);
  modal.addEventListener('close',()=>{closed=true;sequence++;modal.classList.remove('photo-viewer-modal');modal.removeEventListener('keydown',keydown);window.removeEventListener('pim-cloud-connected',connected);},{once:true});
  thumbnails();show(0);

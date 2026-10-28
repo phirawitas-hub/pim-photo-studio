@@ -25,30 +25,74 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
  function font(size=24,weight=400,color=ink){ctx.font=weight+' '+size+'px '+FONT;ctx.fillStyle=color;ctx.textBaseline='top';}
  function wrap(text,maxWidth,size=24,weight=400){font(size,weight);const lines=[];for(const paragraph of String(text??'').split(/\r?\n/)){let line='';for(const ch of paragraph){if(ctx.measureText(line+ch).width>maxWidth&&line){lines.push(line);line=ch;}else line+=ch;}lines.push(line);}return lines;}
  function line(text,x,y,size=24,weight=400,color=ink){font(size,weight,color);ctx.fillText(String(text),x,y);}
- function start(product,label){canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);links=[];pageNumber++;
+ function start(product,label,coverOnly=false){canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);links=[];pageNumber++;
   line('PIM.',M,66,38,700,blue);line('PHOTO STUDIO',M+104,82,17,600,muted);line(label,W-365,82,17,600,muted);ctx.fillStyle='#e5e5ea';ctx.fillRect(M,132,W-M*2,2);
-  y=168;for(const t of wrap(product.code,W-M*2,42,700)){line(t,M,y,42,700);y+=52;}for(const t of wrap(product.name,W-M*2,26,400)){line(t,M,y,26);y+=36;}y+=20;
+  y=168;if(coverOnly)return;for(const t of wrap(product.code,W-M*2,42,700)){line(t,M,y,42,700);y+=52;}for(const t of wrap(product.name,W-M*2,26,400)){line(t,M,y,26);y+=36;}y+=20;
  }
  async function finish(product){line(generated,M,H-68,16,400,muted);line('PIM PHOTO STUDIO  /  '+String(pageNumber).padStart(2,'0'),W-365,H-68,16,600,muted);
   const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',.94));if(!blob)throw Error('สร้างหน้า PDF ไม่สำเร็จ');pages.push({width:W,height:H,jpeg:new Uint8Array(await blob.arrayBuffer()),links,preview:blob});canvas.width=canvas.height=1;await new Promise(r=>setTimeout(r,0));
  }
  async function block(product,label,value){if(value===undefined||value===null||value==='')return;const lines=wrap(value,W-M*2-24,24);if(y+75>H-120){await finish(product);start(product,'PRODUCT DETAILS / CONTINUED');}line(label,M,y,18,600,muted);y+=31;for(const t of lines){if(y+36>H-120){await finish(product);start(product,'PRODUCT DETAILS / CONTINUED');}line(t,M,y,24);y+=34;}y+=24;}
+
+ function panel(x,cy,w,h,fill='#f5f7fb'){ctx.fillStyle=fill;ctx.beginPath();ctx.roundRect(x,cy,w,h,20);ctx.fill();}
+ function limited(text,x,cy,width,size,weight,maxLines,color=ink){
+  const lines=wrap(text,width,size,weight);for(const [i,t] of lines.slice(0,maxLines).entries()){let value=t;if(i===maxLines-1&&lines.length>maxLines){while(ctx.measureText(value+'…').width>width)value=value.slice(0,-1);value+='…';}line(value,x,cy+i*(size+9),size,weight,color);}return lines.length>maxLines;
+ }
+ const imageCache=new Map();
+ async function imageFor(photo,label){const key=photo.fileId||photo.id;if(imageCache.has(key))return imageCache.get(key);
+  const promise=(async()=>{const url=await resolvePhoto(photo);if(!url)throw Error('โหลดภาพ '+label+' ไม่ได้ กรุณาเชื่อมต่อ Google แล้วลองใหม่');const img=new Image();img.src=url;try{await img.decode();}catch{throw Error('อ่านภาพ '+label+' ไม่สำเร็จ');}return img;})();imageCache.set(key,promise);return promise;
+ }
+ function fitImage(img,x,cy,w,h){const scale=Math.min(w/img.naturalWidth,h/img.naturalHeight);const iw=img.naturalWidth*scale,ih=img.naturalHeight*scale;ctx.drawImage(img,x+(w-iw)/2,cy+(h-ih)/2,iw,ih);}
+ async function cover(product,count){
+  start(product,'PRODUCT PHOTOGRAPHY REPORT',true);
+  const primary=product.photos?.inner?.[0]||product.photos?.top?.[0]||ANGLES.flatMap(a=>product.photos?.[a.id]||[])[0];
+  const primaryAngle=ANGLES.find(a=>(product.photos?.[a.id]||[]).includes(primary));
+  const heroY=168,imageSize=370,textX=M+406,textWidth=W-M-textX;
+  panel(M,heroY,imageSize,imageSize);
+  fitImage(await imageFor(primary,primaryAngle.name),M+16,heroY+16,imageSize-32,imageSize-32);
+  line(primaryAngle.name+' 1',M,heroY+imageSize+16,18,600,muted);
+  if(primary.fileId)links.push({url:'https://drive.google.com/file/d/'+primary.fileId+'/view',x:M,y:heroY,w:imageSize,h:imageSize});
+  line('PRODUCT / ITEM CODE',textX,heroY+8,17,600,blue);
+  let overflow=limited(product.code,textX,heroY+42,textWidth,40,700,3);
+  overflow=limited(product.name,textX,heroY+198,textWidth,25,500,3)||overflow;
+  const complete=count.required===7;
+  panel(textX,heroY+314,textWidth,48,complete?'#eaf7ef':'#fff5df');
+  line(complete?'ถ่ายครบทั้ง 7 มุมบังคับ':'อยู่ระหว่างถ่ายภาพ',textX+18,heroY+327,21,600,complete?'#237a45':'#946000');
+  line('Revision '+String(product.revisionNumber||'ฉบับร่าง')+(product.dirty||!product.syncedAt?'  /  ฉบับร่างในเครื่อง':''),textX,heroY+382,18,500,muted);
+  y=602;
+  const cards=[{x:M,w:240,label:'ภาพทั้งหมด',value:String(count.total)+' รูป'},{x:M+258,w:240,label:'มุมบังคับ',value:count.required+' / 7 มุม'},{x:M+516,w:W-M*2-516,label:'ผู้ถ่ายภาพ',value:product.fields?.photographer||'ยังไม่ระบุ'}];
+  for(const c of cards){panel(c.x,y,c.w,112);line(c.label,c.x+20,y+18,17,500,muted);overflow=limited(c.value,c.x+20,y+49,c.w-40,25,600,2)||overflow;}
+  y=742;line('วัตถุประสงค์',M,y,20,600);y+=38;
+  overflow=limited(product.purpose||'ไม่ได้ระบุ',M,y,W-M*2,24,400,4)||overflow;y+=154;
+  line('ขนาดและน้ำหนักสินค้า',M,y,22,600);y+=40;
+  const dim=product.dimensions?.physical||{},fields=[['width','กว้าง','cm'],['length','ยาว','cm'],['height','สูง','cm'],['net','น้ำหนักสุทธิ','kg'],['gross','น้ำหนักรวม','kg']];
+  const col=(W-M*2)/5;panel(M,y,W-M*2,104);
+  fields.forEach(([key,label,unit],i)=>{const x=M+i*col+18;line(label+' ('+unit+')',x,y+18,16,500,muted);const v=dim[key];overflow=limited(v===undefined||v===null||v===''?'—':String(v),x,y+49,col-32,24,600,1)||overflow;});y+=138;
+  line('ภาพที่แนบในรายงาน',M,y,22,600);y+=42;
+  const half=(W-M*2-24)/2;
+  ANGLES.forEach((a,i)=>{const x=M+(i%2)*(half+24),cy=y+Math.floor(i/2)*63,n=product.photos?.[a.id]?.length||0;panel(x,cy,half,52,'#f7f8fa');line(a.name,x+16,cy+15,18,500);line(String(n)+' รูป',x+half-70,cy+15,18,600,n?blue:muted);});
+  y+=278;line('บันทึกลงชีตล่าสุด',M,y,17,500,muted);
+  line(product.syncedAt?new Date(product.syncedAt).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false}):'ยังไม่บันทึก',M,y+29,21,500);
+  await finish(product);return overflow;
+ }
+
  for(const [pi,p] of products.entries()){
   const count=progress(p);if(!count.total)throw Error(p.code+' ยังไม่มีรูป');onProgress('จัดหน้า '+p.code+' · '+(pi+1)+'/'+products.length);
-  start(p,'PRODUCT PHOTOGRAPHY REPORT');
-  const status=count.required===7?'ถ่ายครบทั้ง 7 มุมบังคับ':'อยู่ระหว่างถ่ายภาพ';
-  await block(p,'สถานะ',status+' · '+count.total+' รูป · '+count.required+'/7 มุมบังคับ'+(p.dirty||!p.syncedAt?' · ฉบับร่างในเครื่อง':''));
-  await block(p,'Revision ที่เลือก',String(p.revisionNumber||'ฉบับร่าง'));await block(p,'บันทึกลงชีตล่าสุด',p.syncedAt?new Date(p.syncedAt).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false}):'ยังไม่บันทึก');
-  await block(p,'วัตถุประสงค์',p.purpose);for(const [key,label] of Object.entries({photographer:'ชื่อผู้ถ่าย',company:'Company',brand:'Brand',group:'Item Group',size:'Size',color:'Color',style:'Style',po:'Purchase Order (PO NO.)',lot:'Ref. Lot No.',uom:'UOM',remark:'Remark'}))await block(p,label,p.fields?.[key]);
-  for(const [key,label] of [['physical','Physical Product'],['inner','Original Package (Inner)'],['outer','Original Package (Outer)'],['delivery','Delivery Package']]){const d=p.dimensions?.[key];if(d&&Object.values(d).some(v=>v!==''&&v!==null))await block(p,label,['width','length','height','net','gross'].map((k,i)=>['Width','Length','Height','Net Weight','Gross Weight'][i]+': '+(d[k]??'—')+(i<3?' cm':' kg')).join('   /   '));}
-  await block(p,'รายการภาพ',ANGLES.map(a=>a.name+' · '+(p.photos?.[a.id]?.length||0)+' รูป').join('\n'));
-  await finish(p);
+  const overflow=await cover(p,count);
+  const extraFields=Object.entries({company:'Company',brand:'Brand',group:'Item Group',size:'Size',color:'Color',style:'Style',po:'Purchase Order (PO NO.)',lot:'Ref. Lot No.',uom:'UOM',remark:'Remark'}).filter(([key])=>p.fields?.[key]!==undefined&&p.fields[key]!==null&&p.fields[key]!=='');
+  const extraDimensions=[['inner','Original Package (Inner)'],['outer','Original Package (Outer)'],['delivery','Delivery Package']].filter(([key])=>Object.values(p.dimensions?.[key]||{}).some(v=>v!==''&&v!==null));
+  if(overflow||extraFields.length||extraDimensions.length){
+   start(p,'PRODUCT DETAILS');
+   if(overflow){await block(p,'วัตถุประสงค์',p.purpose);await block(p,'ชื่อผู้ถ่าย',p.fields?.photographer);}
+   for(const [key,label] of extraFields)await block(p,label,p.fields[key]);
+   for(const [key,label] of (overflow?[['physical','Physical Product'],...extraDimensions]:extraDimensions)){const d=p.dimensions?.[key];if(d)await block(p,label,['width','length','height','net','gross'].map((k,i)=>['Width','Length','Height','Net Weight','Gross Weight'][i]+': '+(d[k]??'—')+(i<3?' cm':' kg')).join('   /   '));}
+   await finish(p);
+  }
   const photos=ANGLES.flatMap(a=>(p.photos?.[a.id]||[]).map((photo,i)=>({photo,angle:a,index:i+1})));
   for(let offset=0;offset<photos.length;offset+=4){start(p,'PHOTO GALLERY');const top=y+8,cardW=(W-M*2-28)/2,cardH=(H-130-top-24)/2;
    for(const [i,item] of photos.slice(offset,offset+4).entries()){
     onProgress('โหลดภาพ '+p.code+' · '+(offset+i+1)+'/'+photos.length);
-    const url=await resolvePhoto(item.photo);if(!url)throw Error('โหลดภาพ '+item.angle.name+' ของ '+p.code+' ไม่ได้ กรุณาเชื่อมต่อ Google แล้วลองใหม่');
-    const img=new Image();img.src=url;try{await img.decode();}catch{throw Error('อ่านภาพ '+item.angle.name+' ไม่สำเร็จ');}
+    const img=await imageFor(item.photo,item.angle.name);
     const x=M+(i%2)*(cardW+28),cy=top+Math.floor(i/2)*(cardH+24),imageH=cardH-112;
     ctx.fillStyle='#f2f2f7';ctx.beginPath();ctx.roundRect(x,cy,cardW,imageH,16);ctx.fill();const scale=Math.min((cardW-24)/img.naturalWidth,(imageH-24)/img.naturalHeight);const iw=img.naturalWidth*scale,ih=img.naturalHeight*scale;ctx.drawImage(img,x+(cardW-iw)/2,cy+(imageH-ih)/2,iw,ih);
     line(item.angle.name,x,cy+imageH+16,21,600);line(item.angle.thai+' · รูปที่ '+item.index,x,cy+imageH+46,19,400,muted);

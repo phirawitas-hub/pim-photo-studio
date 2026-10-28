@@ -204,7 +204,7 @@ async function exportCSV(){
  if(cloud.connected()){await refreshCloud(true);sources=sourceWorkbooks(await cloud.readTable('PIM_Source'));}
  const list=filteredProducts();if(!list.length)throw Error('ไม่มีรายการในตัวกรองที่เลือก');
  const rows=csvRows(list,batches,workspace,sources),blob=new Blob([encodeCSV(rows)],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');
- a.href=URL.createObjectURL(blob);a.download='PIM-Photo-Report-'+new Date().toISOString().slice(0,10)+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+ a.href=URL.createObjectURL(blob);a.download='PIM-Photo-Report-'+new Date().toISOString().slice(0,10)+'.csv';reportUrls.push(a.href);openModal(modalHeader('CSV พร้อมดาวน์โหลด')+'<div class="modal-body"><p>'+list.length+' รายการ · '+rows[0].length+' คอลัมน์ · ตามตัวกรองรายการสินค้า</p><p class="help">ลิงก์รูปใช้ Revision ที่กำลังแสดง รูปฉบับร่างที่ยังไม่บันทึกลง Google จะไม่มีลิงก์ Drive</p><a id="csv-download" class="primary pdf-download" href="'+esc(a.href)+'" download="'+esc(a.download)+'">ดาวน์โหลด CSV</a></div>');
  toast('ส่งออก '+list.length+' รายการ · '+rows[0].length+' คอลัมน์'+(cloud.connected()?'':' · ใช้ข้อมูลที่มีในเครื่อง เชื่อม Google เพื่อรับข้อมูลต้นฉบับครบทุกเครื่อง'));
 }
 window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||'เกิดข้อผิดพลาด กรุณาลองใหม่',true);});

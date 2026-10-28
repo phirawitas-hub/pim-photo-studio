@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "PIM Photo Studio",
+  "short_name": "PIM Studio",
+  "description": "จัดการงานถ่ายรูปสินค้าและข้อมูล Google Workspace",
+  "lang": "th",
+  "start_url": "./#products",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f2f7",
+  "theme_color": "#22b8be",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

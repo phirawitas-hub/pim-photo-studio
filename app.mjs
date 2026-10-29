@@ -1,4 +1,4 @@
-import {csvRows,encodeCSV,sourceWorkbooks,inImportRange} from './export.mjs';
+import {csvRows,encodeCSV,sourceWorkbooks,inImportRange} from './export.mjs?v=20261029stock';
 import {initInstall} from './install.mjs';
 import {initTheme} from './theme.mjs';
 initTheme();
@@ -123,7 +123,7 @@ async function loadStock(p){
  const target=$('#stock-summary');if(!target)return;
  if(!cloud.connected()){target.innerHTML='<p class="help">เชื่อม Google เพื่อดูสต็อก VP / VSP</p>';return;}
  try{const result=await cloud.stock(p.code);if(!target.isConnected||current!==p)return;
- target.innerHTML='<div class="divider"></div><h3>Stock · VP / VSP</h3><p class="help">อ่านจากชีตล่าสุด '+fmtDate(result.checkedAt)+' · แสดงแยกบริษัทและ Location</p>'+result.warnings.map(w=>'<p class="notice">'+esc(w)+'</p>').join('')+(result.rows.length?'<div class="table-wrap"><table><thead><tr><th>บริษัท</th><th>Location</th><th>Inventory Status</th><th>Categories</th><th>On Hand Qty</th></tr></thead><tbody>'+result.rows.map(r=>'<tr><td><b>'+r.company+'</b></td><td>'+esc(r.location)+'</td><td>'+esc(r.status)+'</td><td>'+esc(r.categories)+'</td><td>'+esc(r.qty)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="subtext">ไม่พบ Item Code นี้ในข้อมูลสต็อกที่อ่านได้</p>');
+ target.innerHTML='<div class="divider"></div><h3>Stock · Location แยกตามบริษัท</h3><p class="help">อ่านจากชีตล่าสุด '+fmtDate(result.checkedAt)+' · แสดงแยกบริษัทและ Location</p>'+result.warnings.map(w=>'<p class="notice">'+esc(w)+'</p>').join('')+(result.rows.length?'<div class="table-wrap"><table><thead><tr><th>บริษัท</th><th>Location</th><th>Inventory Status</th><th>Categories</th><th>On Hand Qty</th></tr></thead><tbody>'+result.rows.map(r=>'<tr><td><b>'+esc(r.company)+'</b></td><td>'+esc(r.location)+'</td><td>'+esc(r.status)+'</td><td>'+esc(r.categories)+'</td><td>'+esc(r.qty)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="subtext">ไม่พบ Item Code นี้ในข้อมูลสต็อกที่อ่านได้</p>');
  }catch(e){if(target.isConnected)target.textContent=e.message;}
 }
 async function saveCloud(){if(current.demo)throw Error('ข้อมูลสมมติใช้ทดลองในเครื่องเท่านั้น กรุณานำเข้าสินค้าจริงเพื่อบันทึก');if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ในหน้าตั้งค่าก่อน');await saveDraft();if(!current.fields?.photographer?.trim())throw Error('กรุณาระบุชื่อผู้ถ่ายก่อนบันทึก');await cloud.saveProduct(current,busy);renderDetail();toast('บันทึกข้อมูลและลิงก์รูปใน Data แล้ว');}

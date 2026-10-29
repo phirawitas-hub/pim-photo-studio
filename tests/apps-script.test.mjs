@@ -55,7 +55,7 @@ test('same item across imports reuses immutable revision, permits shared photos 
 });
 test('stock matches complete item codes, preserves leading zero and separates companies and statuses',()=>{
  const b=backend();const data=[['Location','Item Code','Description','Inventory\nStatus','Categories ','SUM ของ On Hand\nQty'],['A','001','Part','Good','SPARE PART','0'],['B','001','Part','Hold','SPARE PART','2'],['C','1','Other','Good','SPARE PART','99']];
- const ss={getSheetByName:()=>({getLastRow:()=>data.length,getDataRange:()=>({getDisplayValues:()=>data})})};
+ const ss={getSheetByName:name=>name==='Stock_VPT_VSP'?null:({getLastRow:()=>data.length,getDataRange:()=>({getDisplayValues:()=>data})})};
  const result=b.ctx.stock_(ss,' 001 ');assert.equal(result.rows.length,4);assert.equal(result.rows[0].qty,'0');assert.equal(result.rows[2].company,'VSP');assert.equal(result.rows[1].status,'Hold');
 });
 
@@ -70,3 +70,15 @@ test('Google bridge rejects untrusted origins and only answers the trusted paren
 });
 
 test('Popup Google bridge answers only its GitHub opener',()=>{const b=backend();let html='';b.ctx.HtmlService={XFrameOptionsMode:{ALLOWALL:'allow'},createHtmlOutput:s=>{html=s;return {setXFrameOptionsMode:()=>true};}};const channel='b'.repeat(64);b.ctx.bridge_(channel);const script=html.slice(html.indexOf('<script>')+8,html.lastIndexOf('</script>'));let handler,calls=0;const sent=[],opener={postMessage:(data,origin)=>sent.push({data,origin})},top={opener,postMessage:()=>{throw Error('must target opener');}};const run={withSuccessHandler:fn=>{run.ok=fn;return run;},withFailureHandler:()=>run,pimCall:()=>{calls++;run.ok('ok');}};vm.runInNewContext(script,{setInterval:()=>{},window:{top,addEventListener:(_,fn)=>handler=fn},google:{script:{run}}});const data={type:'pim-request',channel,id:'test',request:{action:'hello'}};handler({origin:'https://phirawitas-hub.github.io',source:top,data});assert.equal(calls,0);handler({origin:'https://phirawitas-hub.github.io',source:opener,data});assert.equal(calls,1);assert.equal(sent[0].data.type,'pim-ready');});
+
+test('combined stock reads Company and optional Categories, prefers unified data and preserves exact codes',()=>{
+ const b=backend(),data=[['Company','Location','Item Code','Description','Inventory\nStatus','SUM ของ On Hand\nQty'],[' vp ','A','001 CH000','Part','Damage','0'],['VSP','B','001 CH000','Part','Good','2'],['VPT','C','001 CH000','Part','Hold','4'],['VP','D','1 CH000','Other','Good','99'],['VP','E','001','Other','Good','7']];
+ const calls=[],ss={getSheetByName:name=>{calls.push(name);return {getLastRow:()=>data.length,getDataRange:()=>({getDisplayValues:()=>data})};}};
+ const result=b.ctx.stock_(ss,' 001 ch000 ');assert.equal(result.rows.length,3);assert.deepEqual(Array.from(result.rows,r=>r.company),['VP','VSP','VPT']);assert.equal(result.rows[0].qty,'0');assert.equal(result.rows[1].location,'B');assert.equal(result.rows[0].categories,'');assert.equal(result.warnings.length,0);assert.deepEqual(calls,['Stock_VPT_VSP']);assert.equal(b.ctx.stock_(ss,'').rows.length,5);
+});
+test('combined stock maps reordered headers and reports missing Company without guessing',()=>{
+ const b=backend();let data=[['title'],['Item Code','On Hand Qty','Location','Company','Inventory Status','Categories'],['001','2','A','VSP','Good','Parts'],['001','3','B','','Good','Parts']];
+ const ss={getSheetByName:()=>({getLastRow:()=>data.length,getDataRange:()=>({getDisplayValues:()=>data})})};
+ const result=b.ctx.stock_(ss,'001');assert.equal(result.rows.length,1);assert.equal(result.rows[0].categories,'Parts');assert.match(result.warnings[0],/Company/);
+ data=[['Item Code','Location','Inventory Status','On Hand Qty'],['001','A','Good','2']];const missing=b.ctx.stock_(ss,'001');assert.equal(missing.rows.length,0);assert.match(missing.warnings[0],/company/);
+});

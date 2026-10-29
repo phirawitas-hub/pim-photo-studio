@@ -37,7 +37,7 @@ export function csvRows(products,batches=[],workspace={},sources=new Map()){
   for(const [g,label] of Object.entries({physical:'Physical Product',inner:'Original Package (Inner)',outer:'Original Package (Outer)',delivery:'Delivery Package'}))for(const [f,name] of Object.entries({width:'Width (cm)',length:'Length (cm)',height:'Height (cm)',net:'Net Weight (kg)',gross:'Gross Weight (kg)'}))r[label+' · '+name]=p.dimensions?.[g]?.[f]??'';
   for(const a of ANGLES)for(let i=0;i<Math.max(MAX_PHOTOS,p.photos?.[a.id]?.length||0);i++){const photo=p.photos?.[a.id]?.[i],label=a.name+' '+(i+1);r[label+' · Drive URL']=drive(photo?.fileId);r[label+' · File name']=photo?.name||'';r[label+' · สถานะ']=photo?(photo.fileId?'บันทึกใน Drive':'ฉบับร่าง ยังไม่มีลิงก์ Drive'):'';}
   const stock=(workspace.stock?.rows||[]).filter(s=>key(s.code)===key(p.code));
-  for(const company of ['VP','VSP']){const rows=stock.filter(s=>s.company===company);for(let i=0;i<Math.max(1,rows.length);i++)for(const [k,label] of Object.entries({location:'Location',status:'Inventory Status',categories:'Categories',qty:'On Hand Qty'}))r[company+' '+(i+1)+' · '+label]=rows[i]?.[k]??'';}
+  for(const company of [...new Set(['VP','VSP',...stock.map(s=>s.company).filter(Boolean)])]){const rows=stock.filter(s=>s.company===company);for(let i=0;i<Math.max(1,rows.length);i++)for(const [k,label] of Object.entries({location:'Location',status:'Inventory Status',categories:'Categories',qty:'On Hand Qty'}))r[company+' '+(i+1)+' · '+label]=rows[i]?.[k]??'';}
   for(const [h,v] of Object.entries(original))r['ต้นฉบับ · '+h]=v;
   return r;
  });

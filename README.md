@@ -98,7 +98,8 @@ Tests แบบ mock ไม่แทนการตรวจ Google จริง
 - หากโหลดภาพใดไม่สำเร็จ จะหยุดและแจ้งข้อผิดพลาด แทนการส่งออกเอกสารที่รูปขาด
 
 ## Stock และ Revision ตาม Item Code
-- อ่าน Stock_VP / Stock_VSP แบบ read-only: Location, Item Code, Inventory Status, Categories, On Hand Qty (รวมชื่อหัว SUM ของ On Hand Qty)
+- อ่าน Stock_VPT_VSP แบบ read-only: Company, Location, Item Code, Inventory Status, On Hand Qty (รวมชื่อหัว SUM ของ On Hand Qty); Categories เป็นคอลัมน์เสริม ไม่จำเป็นต้องมี
+- หากพบชีตรวม จะอ่านชีตรวมเท่านั้นเพื่อไม่ให้ข้อมูลซ้ำ หากไม่มีจึงรองรับ Stock_VP / Stock_VSP เดิม
 - Match รหัสเต็ม ปรับเฉพาะตัวพิมพ์และช่องว่าง ไม่ตัด suffix หรือศูนย์นำหน้า แสดงแยกทุก Location / สถานะ / บริษัท
 - ชื่อผู้ถ่ายจำเป็นก่อนบันทึก Revision อยู่ใน Data และ PDF
 - นำเข้างานซ้ำรหัสเดิมจะเลือก Revision ล่าสุดที่มีรูปให้อัตโนมัติ แต่เก็บงานนำเข้าเป็นคนละแถว

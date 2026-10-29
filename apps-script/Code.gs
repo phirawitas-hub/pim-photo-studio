@@ -305,15 +305,22 @@ function selectRevision_(ss,p){
  writeData_(ss,product,revision,{});return {revision,at};
 }
 function stock_(ss,code){
- const matches=[],warnings=[];const key=itemKey_(code); 
- for(const company of ['VP','VSP']){
-  const name='Stock_'+company,s=ss.getSheetByName(name);if(!s){warnings.push('ไม่พบ '+name);continue;}
-  if(!s.getLastRow())continue;
+ const matches=[],warnings=[],key=itemKey_(code),combined=ss.getSheetByName('Stock_VPT_VSP');
+ const sources=combined?[{name:'Stock_VPT_VSP',sheet:combined}]:['VP','VSP'].map(company=>({name:'Stock_'+company,company,sheet:ss.getSheetByName('Stock_'+company)}));
+ for(const source of sources){
+  const {name,sheet:s}=source;if(!s){warnings.push('ไม่พบ '+name);continue;}if(!s.getLastRow())continue;
   const data=s.getDataRange().getDisplayValues(),header=data.findIndex(r=>r.some(h=>/^(itemcode|รหัสสินค้า)$/.test(normData_(h))));
   if(header<0){warnings.push(name+' ไม่มีหัวข้อ Item Code หรือข้อมูลยังโหลดไม่เสร็จ');continue;}
-  const h=data[header].map(normData_),cols={code:h.findIndex(x=>/^(itemcode|รหัสสินค้า)$/.test(x)),location:h.findIndex(x=>x==='location'),status:h.findIndex(x=>x==='inventorystatus'),categories:h.findIndex(x=>/^categor(y|ies)$/.test(x)),qty:h.findIndex(x=>x.includes('onhandqty'))};
-  if(Object.values(cols).some(i=>i<0)){warnings.push(name+' หัวคอลัมน์ไม่ครบ');continue;}
-  for(let i=header+1;i<data.length;i++){const r=data[i];if(!r[cols.code]||(key&&itemKey_(r[cols.code])!==key))continue;matches.push({company,code:r[cols.code],location:r[cols.location],status:r[cols.status],categories:r[cols.categories],qty:r[cols.qty]});}
+  const h=data[header].map(normData_),cols={company:h.findIndex(x=>/^(company|บริษัท)$/.test(x)),code:h.findIndex(x=>/^(itemcode|รหัสสินค้า)$/.test(x)),location:h.findIndex(x=>x==='location'),status:h.findIndex(x=>x==='inventorystatus'),categories:h.findIndex(x=>/^categor(y|ies)$/.test(x)),qty:h.findIndex(x=>x.includes('onhandqty'))};
+  const required=['code','location','status','qty',...(!source.company?['company']:[])];
+  if(required.some(k=>cols[k]<0)){warnings.push(name+' หัวคอลัมน์ไม่ครบ: '+required.filter(k=>cols[k]<0).join(', '));continue;}
+  let missingCompany=0;
+  for(let i=header+1;i<data.length;i++){
+   const r=data[i];if(!r[cols.code]||(key&&itemKey_(r[cols.code])!==key))continue;
+   const company=source.company||String(r[cols.company]||'').trim().toUpperCase();if(!company){missingCompany++;continue;}
+   matches.push({company,code:r[cols.code],location:r[cols.location]||'',status:r[cols.status]||'',categories:cols.categories<0?'':r[cols.categories]||'',qty:r[cols.qty]??''});
+  }
+  if(missingCompany)warnings.push(name+' มี '+missingCompany+' แถวที่ไม่ได้ระบุ Company');
  }
  return {rows:matches,warnings,checkedAt:new Date().toISOString()};
 }

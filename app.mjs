@@ -38,7 +38,7 @@ function updateConnection(){const ok=cloud.connected();$('#connection-label').te
 function title(eyebrow,heading,sub,actions=''){return `<div class="page-heading"><div><p class="eyebrow">${eyebrow}</p><h1>${heading}</h1><p class="subtext">${sub}</p></div><div class="actions">${actions}</div></div>`;}
 function badge(p){const s=status(p);return `<span class="badge ${s}">${s==='complete'?icon('check'):''}${{waiting:'รอถ่ายรูป',progress:'กำลังดำเนินการ',complete:'ถ่ายครบแล้ว'}[s]}</span>`;}
 function closeModal(){modal.close();stopCamera();importState=null;}
-function openModal(content){stopCamera();modalContent.innerHTML=content;if(!modal.open)modal.showModal();modalContent.querySelector('[data-close]')?.addEventListener('click',closeModal);}
+function openModal(content){stopCamera();modalContent.innerHTML=content;if(!modal.open)modal.showModal();modal.scrollTop=0;modalContent.scrollTop=0;modalContent.querySelector('[data-close]')?.addEventListener('click',closeModal);}
 function modalHeader(text){return `<div class="modal-head"><h2>${text}</h2><button class="close-modal" data-close aria-label="ปิด">${icon('close')}</button></div>`;}
 function stopCamera(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}}
 modal.addEventListener('close',stopCamera);window.addEventListener('pagehide',stopCamera);

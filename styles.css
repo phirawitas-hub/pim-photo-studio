@@ -116,3 +116,5 @@ html,body{max-width:100%;overflow-x:clip}.shell,main,.panel,.product-cell>div:la
 @media(max-width:600px){.report-steps{gap:5px}.report-steps li{font-size:11px;padding:9px 4px}.report-create-bar{align-items:stretch;flex-direction:column}.report-create-bar button{width:100%}.report-selection-bar{font-size:12px}.report-ready-summary{padding:14px}.rank-counts{justify-content:flex-start}.pdf-result .pdf-download{align-self:stretch}.ranking-sort{align-items:flex-start;flex-direction:column}.ranking-sort select{width:100%}}
 
 .report-wizard .report-create-bar{position:sticky;bottom:-24px;background:var(--surface);z-index:2;padding:16px 0;margin-top:10px}.report-wizard .report-options{max-height:32dvh}@media(max-width:900px){.report-wizard .report-create-bar{bottom:-18px}}
+
+dialog:has(.report-wizard) .modal-head{position:sticky;top:0;z-index:3;background:var(--surface)}

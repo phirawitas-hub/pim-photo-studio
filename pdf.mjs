@@ -21,6 +21,7 @@ export function assemblePdf(pages){
 }
 export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{}){
  if(!products.length)throw Error('เลือกสินค้าที่มีรูปอย่างน้อย 1 รายการ');if(products.length>10)throw Error('ส่งออกครั้งละไม่เกิน 10 รายการ เพื่อให้รูปคมชัดและไม่ใช้หน่วยความจำมากเกินไป');
+ const totalWork=products.reduce((sum,p)=>sum+progress(p).total+1,0);let completedWork=0;const notify=message=>onProgress(message,Math.floor(completedWork/totalWork*100));
  const pages=[];let canvas,ctx,links,y,pageNumber=0;const generated=new Date().toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false});
  function font(size=24,weight=400,color=ink){ctx.font=weight+' '+size+'px '+FONT;ctx.fillStyle=color;ctx.textBaseline='top';}
  function wrap(text,maxWidth,size=24,weight=400){font(size,weight);const lines=[];for(const paragraph of String(text??'').split(/\r?\n/)){let line='';for(const ch of paragraph){if(ctx.measureText(line+ch).width>maxWidth&&line){lines.push(line);line=ch;}else line+=ch;}lines.push(line);}return lines;}
@@ -77,8 +78,8 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
  }
 
  for(const [pi,p] of products.entries()){
-  const count=progress(p);if(!count.total)throw Error(p.code+' ยังไม่มีรูป');onProgress('จัดหน้า '+p.code+' · '+(pi+1)+'/'+products.length);
-  const overflow=await cover(p,count);
+  const count=progress(p);if(!count.total)throw Error(p.code+' ยังไม่มีรูป');notify('จัดหน้า '+p.code+' · '+(pi+1)+'/'+products.length);
+  const overflow=await cover(p,count);completedWork++;notify('หน้าปกพร้อม');
   const extraFields=Object.entries({company:'Company',brand:'Brand',group:'Item Group',size:'Size',color:'Color',style:'Style',po:'Purchase Order (PO NO.)',lot:'Ref. Lot No.',uom:'UOM',remark:'Remark'}).filter(([key])=>p.fields?.[key]!==undefined&&p.fields[key]!==null&&p.fields[key]!=='');
   const extraDimensions=[['inner','Original Package (Inner)'],['outer','Original Package (Outer)'],['delivery','Delivery Package']].filter(([key])=>Object.values(p.dimensions?.[key]||{}).some(v=>v!==''&&v!==null));
   if(overflow||extraFields.length||extraDimensions.length){
@@ -91,8 +92,8 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
   const photos=ANGLES.flatMap(a=>(p.photos?.[a.id]||[]).map((photo,i)=>({photo,angle:a,index:i+1})));
   for(let offset=0;offset<photos.length;offset+=4){start(p,'PHOTO GALLERY');const top=y+8,cardW=(W-M*2-28)/2,cardH=(H-130-top-24)/2;
    for(const [i,item] of photos.slice(offset,offset+4).entries()){
-    onProgress('โหลดภาพ '+p.code+' · '+(offset+i+1)+'/'+photos.length);
-    const img=await imageFor(item.photo,item.angle.name);
+    notify('โหลดภาพ '+p.code+' · '+(offset+i+1)+'/'+photos.length);
+    const img=await imageFor(item.photo,item.angle.name);completedWork++;notify('โหลดภาพแล้ว');
     const x=M+(i%2)*(cardW+28),cy=top+Math.floor(i/2)*(cardH+24),imageH=cardH-112;
     ctx.fillStyle='#f2f2f7';ctx.beginPath();ctx.roundRect(x,cy,cardW,imageH,16);ctx.fill();const scale=Math.min((cardW-24)/img.naturalWidth,(imageH-24)/img.naturalHeight);const iw=img.naturalWidth*scale,ih=img.naturalHeight*scale;ctx.drawImage(img,x+(cardW-iw)/2,cy+(imageH-ih)/2,iw,ih);
     line(item.angle.name,x,cy+imageH+16,21,600);line(item.angle.thai+' · รูปที่ '+item.index,x,cy+imageH+46,19,400,muted);
@@ -100,5 +101,5 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
    }await finish(p);
   }
  }
- return {blob:assemblePdf(pages),pages:pages.map(p=>p.preview),filename:'PIM-Photo-'+(products.length===1?products[0].code.replace(/[^\w-]/g,'_'):'Report')+'-'+new Date().toISOString().slice(0,10)+'.pdf'};
+ return {blob:assemblePdf(pages),pages:pages.map(p=>p.preview),filename:'PIM-Photo-'+(products.length===1?products[0].code.replace(/[^\w-]/g,'_'):'Report')+'-'+new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())+'.pdf'};
 }

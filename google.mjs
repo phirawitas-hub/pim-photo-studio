@@ -42,12 +42,7 @@ export async function saveProduct(p,onProgress=()=>{}){
  if(p.pendingRevision&&latest?.[0]===p.pendingRevision){await rpc('revision',{id:p.pendingRevision,productId:p.id});p.baseRevision=p.pendingRevision;p.itemHead=p.pendingRevision;p.revisionNumber=history.length;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
  if(!p.itemHead&&!p.baseRevision&&latest){p.itemHead=latest[0];await db.put('products',p);}
  if((latest?.[0]||null)!==(p.itemHead||p.baseRevision||null))throw Error('มีเวอร์ชันใหม่ในชีต กรุณาตรวจประวัติก่อนบันทึก');
- for(const a of ANGLES){for(const [i,photo] of (p.photos?.[a.id]||[]).entries()){
-  if(photo.fileId)continue;
-  const asset=await db.get('assets',photo.id);if(!asset?.blob)throw Error('ไม่พบไฟล์รูปต้นฉบับ กรุณาเลือกรูปใหม่');
-  onProgress('อัปโหลด '+a.name+' · '+(i+1)+'/'+p.photos[a.id].length);
-  photo.fileId=await upload(asset.blob,{key:'photo-'+photo.id,kind:'photo',productId:p.id,angle:a.id,name:photo.name||p.code+'.jpg'});await db.put('products',p);
- }}
+ await uploadProductPhotos(p,onProgress);
  p.pendingRevision=p.pendingRevision||uid();await db.put('products',p);
  const photos=Object.fromEntries(ANGLES.map(a=>[a.id,(p.photos?.[a.id]||[]).map(x=>({id:x.id,fileId:x.fileId,name:x.name||'',size:x.size||0}))]));
  onProgress('บันทึกเวอร์ชันลง Google Sheet');
@@ -73,3 +68,20 @@ export const saveBranding=brand=>rpc('branding',brand);
 
 export const deletePreview=(batchId,batchName)=>rpc('deletePreview',{batchId,batchName});
 export const deleteImport=(batchId,confirmName)=>rpc('deleteImport',{batchId,batchName:confirmName,confirmName});
+
+export async function uploadProductPhotos(p,onProgress=()=>{}){
+ assertSheet(p);
+ const batch=await db.get('imports',p.importId);
+ if(batch&&!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),message=>onProgress(message,0));
+ const slots=ANGLES.flatMap(a=>(p.photos?.[a.id]||[]).map(photo=>({a,photo}))),total=slots.length;
+ let done=slots.filter(x=>x.photo.fileId).length;onProgress('อัปโหลดรูป '+done+'/'+total,total?Math.floor(done/total*100):100);
+ for(const {a,photo} of slots){
+  if(photo.fileId)continue;
+  const asset=await db.get('assets',photo.id);if(!asset?.blob&&!asset?.fileId)throw Error('ไม่พบไฟล์รูปต้นฉบับ กรุณาเลือกรูปใหม่');
+  photo.fileId=asset.fileId||await upload(asset.blob,{key:'photo-'+photo.id,kind:'photo',productId:p.id,angle:a.id,name:photo.name||p.code+'.jpg'});
+  await db.put('assets',{...asset,fileId:photo.fileId});
+  // Preserve fields and photos edited while the upload was in flight.
+  const latest=await db.get('products',p.id);if(latest){for(const list of Object.values(latest.photos||{}))for(const ph of list)if(ph.id===photo.id)ph.fileId=photo.fileId;await db.put('products',latest);}
+  done++;onProgress('อัปโหลดรูป '+done+'/'+total,Math.floor(done/total*100));
+ }
+}

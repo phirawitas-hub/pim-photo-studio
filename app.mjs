@@ -249,7 +249,7 @@ function openReportPicker(only){
  $('#make-pdf').onclick=()=>run(async()=>{
   const ids=[...modal.querySelectorAll('[data-report-id]:checked')].map(x=>x.dataset.reportId),chosen=eligible.filter(p=>(!$('#report-batch').value||p.importId===$('#report-batch').value)&&ids.includes(p.id));if(!chosen.length)throw Error('เลือกอย่างน้อย 1 รายการ');
   if(chosen.length>10)throw Error('เลือกครั้งละไม่เกิน 10 Item');
-  $('#make-pdf').disabled=true;$('#make-pdf').insertAdjacentHTML('beforebegin','<div id="pdf-progress" role="status" aria-live="polite"></div>');clearReport();const results=[];let failure='';
+  modal.querySelectorAll('.report-steps li').forEach((step,i)=>{step.classList.toggle('active',i===1);if(i===0)step.textContent='✓ เลือกรายการ';});$('#make-pdf').disabled=true;$('#make-pdf').insertAdjacentHTML('beforebegin','<div id="pdf-progress" role="status" aria-live="polite"></div>');clearReport();const results=[];let failure='';
   try{const {createPhotoReport}=await import('./pdf.mjs?v=20261102split');
    for(const [i,p] of chosen.entries()){
     busy('กำลังสร้าง PDF · '+Math.floor(i/chosen.length*100)+'% · '+p.code);

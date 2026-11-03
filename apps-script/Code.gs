@@ -1,4 +1,4 @@
-// PIM Photo Studio. Deploy as a Web app with access restricted to yourself.
+// PIM Photo Studio. Execute as owner; link-access deployment is a shared workspace.
 // Built-in Apps Script services only; no API key, Client ID, or Advanced Services.
 const PIM_SCHEMA = {
   PIM_Deletions:['Import ID','Deleted At','File Name','Plan JSON','Status'],
@@ -18,10 +18,14 @@ function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('Index').setTitle('PIM Photo Studio')
     .addMetaTag('viewport','width=device-width, initial-scale=1');
 }
-// Only this RPC entrypoint is public. No anonymous HTTP write endpoint.
+// Only this RPC entrypoint is public. Deployment controls access; all callers share the fixed PIM workspace.
 function pimCall(request) {
-  if(request && !request.sheetId)request.sheetId=PropertiesService.getScriptProperties().getProperty('PIM_SHEET_ID');
-  if (!request || !/^[\w-]{15,}$/.test(request.sheetId || '')) throw Error('ระบุ Spreadsheet ID ให้ถูกต้อง');
+  // The public app may access only the owner's configured workspace. Never trust a client-supplied sheet ID.
+  const sheetId=String(PropertiesService.getScriptProperties().getProperty('PIM_SHEET_ID')||'').trim();
+  if(!/^[\w-]{15,}$/.test(sheetId))throw Error('ผู้ดูแลต้องตั้งค่า PIM_SHEET_ID ก่อนเปิดใช้งาน');
+  if(!request || typeof request!=='object' || Array.isArray(request))throw Error('คำขอไม่ถูกต้อง');
+  if(request.sheetId && request.sheetId!==sheetId)throw Error('แอปนี้ใช้งานได้เฉพาะชีต PIM ที่กำหนดไว้');
+  request={...request,sheetId};
   const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
   const readOnly=['hello','read','stock','itemHistory','photo','snapshot','workspace'].includes(request.action);

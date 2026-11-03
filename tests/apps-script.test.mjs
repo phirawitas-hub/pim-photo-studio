@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 const code=await readFile(new URL('../apps-script/Code.gs',import.meta.url),'utf8');
 function backend(){
  const tables=new Map(),writes=[],locks={taken:0,released:0};
- const ctx=vm.createContext({console,Date,Set,Map,LockService:{getScriptLock:()=>({tryLock:()=>{locks.taken++;return true;},releaseLock:()=>locks.released++})},SpreadsheetApp:{openById:()=>({getId:()=> 'test-sheet-123456',getName:()=> 'Test'})}});
+ const ctx=vm.createContext({console,Date,Set,Map,PropertiesService:{getScriptProperties:()=>({getProperty:()=> 'test-sheet-123456'})},LockService:{getScriptLock:()=>({tryLock:()=>{locks.taken++;return true;},releaseLock:()=>locks.released++})},SpreadsheetApp:{openById:()=>({getId:()=> 'test-sheet-123456',getName:()=> 'Test'})}});
  vm.runInContext(code,ctx);
  // Replace storage boundary only: validation, idempotency and locking remain real.
  ctx.writeData_=()=>{};ctx.schema_=()=>{};ctx.table_=(_,name)=>tables.get(name)||[];
@@ -81,4 +81,19 @@ test('combined stock maps reordered headers and reports missing Company without 
  const ss={getSheetByName:()=>({getLastRow:()=>data.length,getDataRange:()=>({getDisplayValues:()=>data})})};
  const result=b.ctx.stock_(ss,'001');assert.equal(result.rows.length,1);assert.equal(result.rows[0].categories,'Parts');assert.match(result.warnings[0],/Company/);
  data=[['Item Code','Location','Inventory Status','On Hand Qty'],['001','A','Good','2']];const missing=b.ctx.stock_(ss,'001');assert.equal(missing.rows.length,0);assert.match(missing.warnings[0],/company/);
+});
+
+
+test('public workspace defaults to configured sheet and rejects any other sheet before access',()=>{
+ const b=backend(),opened=[];b.ctx.SpreadsheetApp.openById=id=>{opened.push(id);return {getId:()=>id,getName:()=> 'Test'};};
+ assert.equal(b.ctx.pimCall({action:'hello'}).sheetId,'test-sheet-123456');
+ assert.throws(()=>b.ctx.pimCall({sheetId:'another-sheet-123456',action:'hello'}),/เฉพาะชีต PIM/);
+ assert.deepEqual(opened,['test-sheet-123456']);assert.equal(b.locks.taken,0);
+});
+test('public workspace fails closed when configuration or request is missing',()=>{
+ const b=backend();let opens=0;b.ctx.SpreadsheetApp.openById=()=>{opens++;};
+ for(const id of [null,'','invalid']){b.ctx.PropertiesService.getScriptProperties=()=>({getProperty:()=>id});assert.throws(()=>b.ctx.pimCall({sheetId:'test-sheet-123456',action:'hello'}),/PIM_SHEET_ID/);}
+ b.ctx.PropertiesService.getScriptProperties=()=>({getProperty:()=> 'test-sheet-123456'});
+ for(const request of [null,undefined,[],42])assert.throws(()=>b.ctx.pimCall(request),/คำขอไม่ถูกต้อง/);
+ assert.equal(opens,0);assert.equal(b.locks.taken,0);
 });

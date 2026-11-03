@@ -1,19 +1,21 @@
 # PIM Photo Studio
 
 เว็บถ่ายรูปสินค้า ใช้ Google Apps Script บันทึกข้อมูลใน Google Sheets และเก็บรูปใน Google Drive
-เปิดใช้งานบน GitHub Pages และเชื่อม Google ผ่าน Apps Script ส่วนตัวด้วย iframe bridge ที่ตรวจ origin
+เปิดใช้งานบน GitHub Pages และเชื่อม Google ผ่าน Apps Script ผ่าน iframe bridge ที่ตรวจ origin
 ไม่ต้องสร้าง OAuth Client ID เปิด Advanced Services หรือผูก Billing
 
 ## เปิดใช้ครั้งแรก
 1. เข้า https://script.google.com/ แล้วสร้างโปรเจกต์
 2. ใส่เนื้อหา apps-script/Code.gs ในไฟล์สคริปต์ และสร้างไฟล์ HTML ชื่อ Index จาก apps-script/Index.html
 3. Deploy → New deployment → Web app
-4. Execute as: Me และ Who has access: Only myself สำหรับการใช้งานบัญชีนี้
+4. Execute as: Me (เจ้าของ) · แบบส่วนตัวเลือก Only myself · แบบพื้นที่ร่วมที่ทุกคนมีลิงก์ใช้งานได้เลือก Anyone
 5. อนุญาตสิทธิ์ Google Sheets และ Drive ครั้งแรก แล้วเปิด Web app URL ที่ลงท้าย /exec
 6. ตั้ง Script property `PIM_SHEET_ID` เป็น Spreadsheet ID ของชีตเป้าหมาย แล้วตั้ง origin ใน bridge_ ให้ตรงเว็บ GitHub ของคุณ
 7. Import Excel/CSV เลือกแท็บและคอลัมน์ แล้วเริ่มถ่ายรูป
 
-การตั้งค่านี้เปิดให้เจ้าของบัญชีเท่านั้น ห้ามเปลี่ยนเป็น Anyone โดยไม่เพิ่มระบบตรวจผู้ใช้ก่อน
+โหมด Anyone เป็นพื้นที่ทำงานส่วนกลาง: ทุกคนที่มีลิงก์สามารถอ่าน เพิ่ม แก้ไข และลบข้อมูลชุดเดียวกันได้ ใช้เฉพาะเมื่อเจ้าของอนุญาตรูปแบบนี้อย่างชัดเจน ไม่ต้องระบุอีเมลหรือแชร์สิทธิ์แก้ไขชีตให้ผู้ใช้แต่ละราย
+โค้ดปฏิเสธ Spreadsheet ID ที่ไม่ตรง PIM_SHEET_ID และหยุดทำงานหากยังไม่ได้ตั้งค่านี้ จึงไม่เปิดให้ผู้เรียกเลือกชีตอื่นของเจ้าของ
+สิทธิ์ไฟล์ Drive โดยตรงยังเป็นไปตามการแชร์ใน Google Drive การดูรูปภายในแอปส่งผ่านเฉพาะไฟล์ที่มีใน PIM_Files
 Google ขอสิทธิ์ Sheets และ Drive ตามบริการในสคริปต์ สิทธิ์ DriveApp ครอบคลุม Drive ของบัญชี แต่โค้ดนี้สร้าง/อ่านไฟล์ของแอปและชีตที่ระบุ ไม่เปลี่ยนการแชร์ไฟล์
 
 ## ใช้งาน
@@ -33,7 +35,7 @@ GitHub และ Apps Script เป็นคนละเว็บไซต์ �
 ไฟล์ JSON นี้มีรูปและข้อมูลต้นฉบับ เก็บเป็นส่วนตัว การนำเข้าจะไม่ทับรายการที่มีอยู่ในเบราว์เซอร์ปลายทาง
 
 ## GitHub Pages
-หน้า GitHub เชื่อม Google อัตโนมัติผ่าน iframe bridge ส่วนตัว โดยตรวจ origin, source และ nonce สุ่มต่อการเชื่อมต่อ ไม่เปิด doPost สาธารณะและไม่เก็บ token ในเว็บ
+หน้า GitHub เชื่อม Google อัตโนมัติผ่าน iframe bridge โดยตรวจ origin, source และ nonce สุ่มต่อการเชื่อมต่อ ไม่เปิด doPost สาธารณะและไม่เก็บ token ในเว็บ
 Bridge response อนุญาต framing แต่ไม่มี UI หรือข้อมูลใน HTML และรับคำสั่งจาก origin GitHub ที่กำหนดเท่านั้น หน้าแอป Apps Script ปกติยังใช้ frame protection ตามเดิม
 หากเบราว์เซอร์บล็อก Google session ใน iframe ให้ใช้ลิงก์เข้าสู่ระบบในหน้าการตั้งค่า แล้วกลับมากดเชื่อมต่ออีกครั้ง
 ไม่มี token, Excel หรือรูปผู้ใช้ใน repository

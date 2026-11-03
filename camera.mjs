@@ -1,0 +1,9 @@
+export function preferredCamera(devices){const cameras=devices.filter(d=>d.kind==='videoinput');return cameras.find(d=>/back|rear|environment|หลัง/i.test(d.label)&&!/ultra|tele|0[.,][56]|wide.?angle/i.test(d.label))||null;}
+export function zoomChoices(capabilities={}){const range=capabilities.zoom;if(range&&Number.isFinite(range.min)&&Number.isFinite(range.max)&&range.max>range.min)return {hardware:true,values:[...new Set([range.min,...[0.6,1,2,3].filter(n=>n>=range.min&&n<=range.max)])].sort((a,b)=>a-b),min:range.min,max:range.max};return {hardware:false,values:[1,2,3],min:1,max:3};}
+export function cropForZoom(width,height,zoom=1){const z=Math.max(1,zoom),w=width/z,h=height/z;return {x:(width-w)/2,y:(height-h)/2,width:w,height:h};}
+export class CameraSession{
+ constructor(media){this.media=media;this.stream=null;this.closed=false;this.sequence=0;this.digitalZoom=1;}
+ async open(deviceId){const seq=++this.sequence;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;const next=await this.media.getUserMedia({video:{...(deviceId?{deviceId:{exact:deviceId}}:{facingMode:{ideal:'environment'}}),width:{ideal:1920},height:{ideal:1440}},audio:false});if(this.closed||seq!==this.sequence){next.getTracks().forEach(t=>t.stop());return null;}this.stream=next;this.digitalZoom=1;return next;}
+ async zoom(value){const track=this.stream?.getVideoTracks()[0];if(!track)throw Error('กล้องยังไม่พร้อม');const choices=zoomChoices(track.getCapabilities?.()||{});if(!choices.values.includes(value))throw Error('กล้องนี้ไม่รองรับระดับซูมที่เลือก');if(choices.hardware){await track.applyConstraints({advanced:[{zoom:value}]});this.digitalZoom=1;return track.getSettings?.().zoom??value;}this.digitalZoom=value;return value;}
+ stop(){this.closed=true;this.sequence++;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;}
+}

@@ -1,6 +1,6 @@
 import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261109refresh';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
-import * as db from './store.mjs';
+import * as db from './store.mjs?v=20261109refresh';
 import {requireValidImport} from './import-check.mjs';
 let config=null,online=false,title='';
 export const hosted=()=>!!globalThis.google?.script?.run;

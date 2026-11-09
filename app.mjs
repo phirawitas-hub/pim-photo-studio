@@ -8,7 +8,7 @@ import {initTheme} from './theme.mjs?v=20261103clean';
 initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs';
-import * as db from './store.mjs';
+import * as db from './store.mjs?v=20261109refresh';
 import * as cloud from './google.mjs?v=20261109refresh';
 import {openPhotoViewer} from './viewer.mjs?v=20261028gallery';
 cloud.warmup();

@@ -1,4 +1,4 @@
-import {findHeader} from './core.mjs';
+import {findHeader,mappedProducts,normalizeHeader} from './core.mjs';
 // Use actual cells, never iterate an Excel formatting-only million-row range.
 export function inspectWorkbook(XLSX,buffer){
  const wb=XLSX.read(buffer,{type:'array',cellFormula:true,cellNF:true,cellText:true,cellStyles:false});
@@ -8,4 +8,16 @@ export function inspectWorkbook(XLSX,buffer){
  return {name,rows,cells,merges:ws['!merges']||[],range:ws['!ref']||'',header:findHeader(rows)};
  });
  return {sheets,properties:wb.Props||{},sheetProperties:wb.Workbook?.Sheets||[],names:wb.Workbook?.Names||[]};
+}
+
+// Prefer the request form over cover pages or stock/reference tabs.
+export function selectImportSheet(workbook){
+ const candidates=workbook.sheets.map((sheet,index)=>{
+  const map=sheet.header,header=sheet.rows.find(r=>r.number===map.row)?.cells||[];
+  const recognized=map.code!==map.name&&/itemcode|รหัสสินค้า|^sku$|goodcode/.test(normalizeHeader(header[map.code]))&&/productname|ชื่อสินค้า|description|goodname/.test(normalizeHeader(header[map.name]));
+  return {index,map,recognized,count:recognized?mappedProducts(sheet.rows,map).products.length:0};
+ }).filter(x=>x.recognized&&x.count);
+ const selected=candidates.find(x=>x.map.purpose>=0)||candidates[0];
+ if(!selected)throw Error('ไม่พบรายการสินค้าในแบบฟอร์ม กรุณาตรวจหัวข้อ Item Code และชื่อสินค้าในไฟล์ แล้วเลือกไฟล์ใหม่');
+ return {index:selected.index,map:{...selected.map}};
 }

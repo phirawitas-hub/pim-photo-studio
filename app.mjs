@@ -1,4 +1,5 @@
 import {itemCodeKey,reviewImportProducts,requireValidImport} from './import-check.mjs';
+import {selectImportSheet} from './importer.mjs?v=20261109simple';
 import {CameraSession,preferredCamera,zoomChoices,cropForZoom} from './camera.mjs';
 import {requesterRanking} from './insights.mjs';
 import {csvRows,encodeCSV,sourceWorkbooks,inImportRange} from './export.mjs?v=20261029stock';
@@ -169,7 +170,7 @@ async function refreshCloud(silent=false){
  if(!silent)toast('ข้อมูลตรงกับชีต '+rows.length+' รายการ · เก็บรูปฉบับร่างไว้');
  }finally{syncing=false;}
 }
-function openImport(){importState=null;openModal(modalHeader('Import File')+`<div class="modal-body"><p class="subtext" style="margin-bottom:20px">นำเข้าแบบฟอร์มขอรูปถ่ายสินค้า แล้วตรวจรายการก่อนเริ่มงาน</p><label class="dropzone" id="dropzone" tabindex="0">${icon('import')}<strong>เลือกไฟล์ หรือลากไฟล์มาวางที่นี่</strong><small>Excel (.xlsx, .xls) หรือ CSV · สูงสุด 25 MB</small><input type="file" id="import-file" accept=".xlsx,.xls,.csv" hidden></label><div class="sync-note" style="margin-top:18px">${icon('info')}<span>ข้อมูลทุกแท็บจะถูกเก็บพร้อมไฟล์ต้นฉบับเมื่อบันทึกลง Google ส่วนคิวถ่ายรูปจะสร้างจากแท็บที่คุณเลือก</span></div></div>`);
+function openImport(){importState=null;openModal(modalHeader('Import File')+`<div class="modal-body"><p class="subtext" style="margin-bottom:20px">นำเข้าแบบฟอร์มขอรูปถ่ายสินค้า แล้วตรวจรายการก่อนเริ่มงาน</p><label class="dropzone" id="dropzone" tabindex="0">${icon('import')}<strong>เลือกไฟล์ หรือลากไฟล์มาวางที่นี่</strong><small>Excel (.xlsx, .xls) หรือ CSV · สูงสุด 25 MB</small><input type="file" id="import-file" accept=".xlsx,.xls,.csv" hidden></label><div class="sync-note" style="margin-top:18px">${icon('info')}<span>ข้อมูลทุกแท็บจะถูกเก็บพร้อมไฟล์ต้นฉบับเมื่อบันทึกลง Google ระบบจะอ่านแบบฟอร์มและตรวจรายการสินค้าให้อัตโนมัติ</span></div></div>`);
  const input=$('#import-file'),zone=$('#dropzone');input.onchange=()=>input.files[0]&&run(()=>parseImport(input.files[0]));
  zone.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();input.click();}};zone.ondragover=e=>{e.preventDefault();zone.classList.add('over');};zone.ondragleave=()=>zone.classList.remove('over');zone.ondrop=e=>{e.preventDefault();zone.classList.remove('over');if(e.dataTransfer.files.length!==1)return toast('เลือกครั้งละ 1 ไฟล์',true);run(()=>parseImport(e.dataTransfer.files[0]));};
 }
@@ -179,15 +180,11 @@ async function parseImport(file){
  if(!workbook.sheets.length)throw Error('ไฟล์ไม่มีแท็บข้อมูล');
  const fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer()))).map(v=>v.toString(16).padStart(2,'0')).join('');
  if(batches.some(b=>b.fingerprint===fingerprint))throw Error('ไฟล์นี้เคยนำเข้าแล้ว กรุณาเปิดรายการเดิมในประวัติการนำเข้า');
- importState={file,workbook,fingerprint,index:0,map:{...workbook.sheets[0].header}};renderMapping();
+ importState={file,workbook,fingerprint,...selectImportSheet(workbook)};renderMapping();
 }
 function renderMapping(){
- const state=importState,sheet=state.workbook.sheets[state.index];const colCount=Math.max(1,...sheet.rows.map(r=>r.cells.length));const header=sheet.rows.find(r=>r.number===state.map.row)?.cells||[];
- const options=(chosen,optional=false)=>(optional?'<option value="-1">ไม่ระบุ</option>':'')+Array.from({length:colCount},(_,i)=>`<option value="${i}" ${Number(chosen)===i?'selected':''}>${String.fromCharCode(65+i)} · ${esc(String(header[i]||'คอลัมน์ '+(i+1)).slice(0,55))}</option>`).join('');
- openModal(modalHeader('ตรวจสอบข้อมูลก่อนนำเข้า')+`<div class="modal-body"><div class="file-summary">${icon('file')}<div><b>${esc(state.file.name)}</b><small>${size(state.file.size)} · ${state.workbook.sheets.length} แท็บ · เก็บข้อมูลต้นฉบับทุกแท็บ</small></div></div><div class="grid2"><label class="field">แท็บที่ใช้สร้างคิวถ่ายรูป<select id="source-sheet">${state.workbook.sheets.map((s,i)=>`<option value="${i}" ${state.index===i?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label><label class="field">เลขแถวหัวตาราง<input id="header-row" type="number" min="1" max="${Math.max(...sheet.rows.map(r=>r.number))}" value="${state.map.row}"></label></div><div class="import-mapping"><label class="field">Item Code *<select id="map-code">${options(state.map.code)}</select></label><label class="field">ชื่อสินค้า *<select id="map-name">${options(state.map.name)}</select></label><label class="field">วัตถุประสงค์<select id="map-purpose">${options(state.map.purpose,true)}</select></label></div><div id="import-code-check" class="import-code-check" aria-live="polite"></div><div class="actions import-check-actions"><button id="recheck-import-codes" type="button">ตรวจ Item code อีกครั้ง</button><button id="replace-import-file" type="button">เลือกไฟล์ใหม่</button></div><div id="mapping-preview"></div><p class="help">รายการต้องมีรหัสและชื่อสินค้า • รหัสซ้ำในแท็บเดียวกันรวมเป็นงานถ่าย 1 รายการ แต่ข้อมูลต้นฉบับทุกแถวยังเก็บครบ</p></div><div class="modal-footer"><small id="import-summary"></small><button id="confirm-import" class="primary">${icon('import')}นำเข้ารายการ</button></div>`);
- $('#source-sheet').onchange=e=>{state.index=Number(e.target.value);state.map={...state.workbook.sheets[state.index].header};renderMapping();};
- $('#header-row').onchange=e=>{if(!e.target.checkValidity())return e.target.reportValidity();state.map.row=Number(e.target.value);renderMapping();};
- for(const k of ['code','name','purpose'])$('#map-'+k).onchange=e=>{state.map[k]=Number(e.target.value);mappingPreview();};
+ const state=importState;
+ openModal(modalHeader('ตรวจสอบข้อมูลก่อนนำเข้า')+`<div class="modal-body"><div class="file-summary">${icon('file')}<div><b>${esc(state.file.name)}</b><small>${size(state.file.size)} · ${state.workbook.sheets.length} แท็บ · เก็บข้อมูลต้นฉบับทุกแท็บ</small></div></div><div id="import-code-check" class="import-code-check" aria-live="polite"></div><div class="actions import-check-actions"><button id="recheck-import-codes" type="button">ตรวจ Item code อีกครั้ง</button><button id="replace-import-file" type="button">เลือกไฟล์ใหม่</button></div><div id="mapping-preview"></div><p class="help">รายการต้องมีรหัสและชื่อสินค้า • รหัสซ้ำในแท็บเดียวกันรวมเป็นงานถ่าย 1 รายการ แต่ข้อมูลต้นฉบับทุกแถวยังเก็บครบ</p></div><div class="modal-footer"><small id="import-summary"></small><button id="confirm-import" class="primary">${icon('import')}นำเข้ารายการ</button></div>`);
  $('#confirm-import').onclick=()=>run(commitImport);$('#recheck-import-codes').onclick=()=>{state.checkSignature='';mappingPreview();};$('#replace-import-file').onclick=openImport;mappingPreview();
 }
 function mappingPreview(){
@@ -199,7 +196,7 @@ function mappingPreview(){
  if(mapped&&state.checkSignature!==signature){state.checkSignature=signature;state.codeCheck=null;state.checkError='';state.checking=true;checkImportCodes(state,signature);}
  const review=reviewImportProducts(result.products,state.codeCheck);
  const box=$('#import-code-check');box.className='import-code-check '+(state.checking?'checking':review.valid?'passed':'failed');
- box.innerHTML=state.checking?'<b>กำลังตรวจ Item code และ Location…</b><p>ตรวจจากชีตสต็อกล่าสุดก่อนนำเข้า</p>':!mapped?'<b>เลือกคอลัมน์ Item code และชื่อสินค้าให้ถูกต้อง</b>':!review.readable?'<b>ยังตรวจสอบ Item code ไม่สำเร็จ</b><p>'+esc(state.checkError||review.warnings.join(' · ')||review.message)+'</p>':review.missing.length?'<b>กรุณาตรวจสอบ Item code · ไม่พบ '+review.missing.length+' รายการ</b><p>แก้รหัสในไฟล์ให้ตรงกับรหัสเต็มในสต็อก รวมตัวอักษรหรือรหัสสีท้าย Item code แล้วเลือกไฟล์ใหม่</p>':'<b>ตรวจพบ Item code ครบ '+result.products.length+' รายการ</b><p>'+ (review.noLocation.length?'พบรหัสแต่ยังไม่มี Location '+review.noLocation.length+' รายการ · ตรวจข้อมูลตำแหน่งในชีตสต็อก':'พร้อมนำเข้า · แสดง Location ตามชีตสต็อก')+'</p>';
+ box.innerHTML=state.checking?'<b>กำลังตรวจ Item code และ Location…</b><p>ตรวจจากชีตสต็อกล่าสุดก่อนนำเข้า</p>':!mapped?'<b>ไม่พบรายการสินค้า กรุณาตรวจไฟล์แล้วเลือกใหม่</b>':!review.readable?'<b>ยังตรวจสอบ Item code ไม่สำเร็จ</b><p>'+esc(state.checkError||review.warnings.join(' · ')||review.message)+'</p>':review.missing.length?'<b>กรุณาตรวจสอบ Item code · ไม่พบ '+review.missing.length+' รายการ</b><p>แก้รหัสในไฟล์ให้ตรงกับรหัสเต็มในสต็อก รวมตัวอักษรหรือรหัสสีท้าย Item code แล้วเลือกไฟล์ใหม่</p>':'<b>ตรวจพบ Item code ครบ '+result.products.length+' รายการ</b><p>'+ (review.noLocation.length?'พบรหัสแต่ยังไม่มี Location '+review.noLocation.length+' รายการ · ตรวจข้อมูลตำแหน่งในชีตสต็อก':'พร้อมนำเข้า · แสดง Location ตามชีตสต็อก')+'</p>';
  $('#mapping-preview').innerHTML='<div class="preview-table import-stock-preview"><table><thead><tr><th>แถว</th><th>ITEM CODE</th><th>ชื่อสินค้า</th><th>ผลตรวจ / Location</th></tr></thead><tbody>'+review.items.map(p=>'<tr class="'+(p.status==='missing'?'import-code-missing':'')+'"><td>'+p.sourceRow+'</td><td class="code">'+esc(p.code)+'</td><td>'+esc(p.name)+'</td><td>'+(state.checking?'กำลังตรวจสอบ…':p.status==='missing'?'<strong class="import-code-error">กรุณาตรวจสอบ Item code</strong><small>ไม่พบรหัสนี้ในสต็อก</small>':p.status==='found'?(p.locations?.length?p.locations.map(esc).join('<br>'):'<span class="import-location-empty">พบ Item code · ยังไม่มี Location</span>'):'รอตรวจสอบ')+'</td></tr>').join('')+'</tbody></table></div>';
  $('#import-summary').textContent=result.products.length+' รายการ · รหัสซ้ำ '+result.duplicates+' · ข้ามแถวไม่ครบ '+result.skipped;
  $('#confirm-import').disabled=!mapped||state.checking||!review.valid;
@@ -216,7 +213,7 @@ async function checkImportCodes(state,signature){
  if(importState===state&&state.checkSignature===signature&&state.checkRequest===request){state.checking=false;mappingPreview();}
 }
 async function commitImport(){
- const s=importState;if(!s?.result.products.length||s.map.code===s.map.name)throw Error('กรุณาตรวจคอลัมน์ก่อนนำเข้า');
+ const s=importState;if(!s?.result.products.length||s.map.code===s.map.name)throw Error('กรุณาตรวจรายการสินค้าก่อนนำเข้า');
  busy('กำลังตรวจ Item code กับสต็อกล่าสุดก่อนนำเข้า');
  const check=await cloud.validateItems(s.result.products.map(p=>p.code));
  if(importState!==s)return;s.codeCheck=check;s.checking=false;mappingPreview();

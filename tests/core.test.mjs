@@ -11,3 +11,15 @@ test('bilingual merged form mapping; codes retain zero; footer skipped',()=>{con
 test('sparse cells ignore inflated million-row range; preserve formula and merge',()=>{const wb=XLSX.utils.book_new();const ws={'!ref':'A1:C1048576',A1:{t:'s',v:'Item Code'},B1:{t:'s',v:'Product Name'},A2:{t:'s',v:'00012'},B2:{t:'s',v:'Example'},C2:{t:'n',v:4,f:'2+2'},'!merges':[{s:{r:3,c:0},e:{r:3,c:2}}]};XLSX.utils.book_append_sheet(wb,ws,'Form');const orig=XLSX.read;XLSX.read=()=>wb;try{const result=inspectWorkbook(XLSX,new ArrayBuffer(0));assert.equal(result.sheets[0].rows.length,2);assert.equal(result.sheets[0].cells.length,5);assert.equal(result.sheets[0].cells.find(c=>c.address==='C2').formula,'2+2');assert.equal(result.sheets[0].merges.length,1);}finally{XLSX.read=orig;}});
 test('source JSON chunks are lossless',()=>{const value='ข้อความ😀'.repeat(10000);const chunks=chunkText(value);assert.equal(chunks.join(''),value);assert.ok(chunks.every(x=>x.length<=40000));});
 test('validate IDs and escape imported HTML',()=>{assert.equal(safeId('https://docs.google.com/spreadsheets/d/abcdefghijklmnop/edit'),'abcdefghijklmnop');assert.throws(()=>safeId('javascript:alert(1)'));assert.equal(esc('<img onerror="x">'),'&lt;img onerror=&quot;x&quot;&gt;');});
+
+
+test('automatic import skips cover/reference sheets and reads the request form without mapping controls',async()=>{
+ const {selectImportSheet}=await import('../importer.mjs');
+ const make=rows=>({rows,header:findHeader(rows)});
+ const cover=make([{number:1,cells:['Instructions']},{number:2,cells:['A','B']}]);
+ const stock=make([{number:1,cells:['Item Code','Description']},{number:2,cells:['STOCK','Stock reference']}]);
+ const form=make([{number:8,cells:['No.','Item Code\\nรหัสสินค้า','','','','Product Name\\nชื่อสินค้า','','','','Purpose of request']},{number:9,cells:[1,'00123','','','','Product A','','','','Test']}]);
+ assert.deepEqual(selectImportSheet({sheets:[cover,stock,form]}),{index:2,map:form.header});
+ assert.equal(selectImportSheet({sheets:[stock]}).index,0);
+ assert.throws(()=>selectImportSheet({sheets:[cover]}),/ไม่พบรายการสินค้า/);
+});

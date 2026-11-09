@@ -26,9 +26,9 @@ function pimCall(request) {
   if(!request || typeof request!=='object' || Array.isArray(request))throw Error('คำขอไม่ถูกต้อง');
   if(request.sheetId && request.sheetId!==sheetId)throw Error('แอปนี้ใช้งานได้เฉพาะชีต PIM ที่กำหนดไว้');
   request={...request,sheetId};
-  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport'];
+  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','validateItems','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
-  const readOnly=['hello','read','stock','itemHistory','photo','snapshot','workspace'].includes(request.action);
+  const readOnly=['hello','read','stock','validateItems','itemHistory','photo','snapshot','workspace'].includes(request.action);
   const lock=readOnly?null:LockService.getScriptLock();
   if (lock&&!lock.tryLock(30000)) throw Error('มีงานบันทึกอยู่ กรุณาลองใหม่');
   try {
@@ -39,6 +39,7 @@ function pimCall(request) {
     if (request.action==='workspace') return workspace_(ss);
     if (request.action==='snapshot') return Object.assign(workspace_(ss),{products:table_(ss,'PIM_Products'),revisions:table_(ss,'PIM_Revisions'),selections:table_(ss,'PIM_Selections')});
     if (request.action==='stock') return stock_(ss,p.code);
+    if (request.action==='validateItems') return validateItems_(ss,p.codes);
     if (request.action==='itemHistory') return itemHistory_(ss,p.code);
     if (request.action==='photo') return photo_(ss,p.fileId);
     if(request.action==='deletePreview')return deletePreview_(ss,p);
@@ -327,6 +328,14 @@ function stock_(ss,code){
   if(missingCompany)warnings.push(name+' มี '+missingCompany+' แถวที่ไม่ได้ระบุ Company');
  }
  return {rows:matches,warnings,checkedAt:new Date().toISOString()};
+}
+function validateItems_(ss,codes){
+ if(!Array.isArray(codes)||!codes.length||codes.length>5000||codes.some(c=>typeof c!=='string'||!c.trim()||c.length>250))throw Error('ส่ง Item code ที่ต้องการตรวจสอบไม่เกิน 5,000 รายการ');
+ const stock=stock_(ss,''),byCode=new Map();
+ for(const row of stock.rows){const key=itemKey_(row.code);if(!byCode.has(key))byCode.set(key,[]);byCode.get(key).push(row);}
+ const readable=stock.rows.length>0&&!stock.warnings.length;
+ const warnings=[...stock.warnings];if(!stock.rows.length)warnings.push('ยังไม่มีข้อมูลสต็อกที่อ่านได้ กรุณาตรวจชีต Stock_VPT_VSP');
+ return {readable,warnings,checkedAt:stock.checkedAt,items:[...new Set(codes)].map(code=>{const rows=byCode.get(itemKey_(code))||[];return {code,found:readable?rows.length>0:null,locations:[...new Set(rows.filter(r=>String(r.location).trim()).map(r=>r.company+' · '+r.location))]};})};
 }
 // The bridge contains no account UI. Only the authorized GitHub origin can invoke
 // it, and responses are sent exclusively to that origin. Google sign-in/access

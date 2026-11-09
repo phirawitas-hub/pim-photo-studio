@@ -1,3 +1,4 @@
+import {itemCodeKey,reviewImportProducts,requireValidImport} from './import-check.mjs';
 import {CameraSession,preferredCamera,zoomChoices,cropForZoom} from './camera.mjs';
 import {requesterRanking} from './insights.mjs';
 import {csvRows,encodeCSV,sourceWorkbooks,inImportRange} from './export.mjs?v=20261029stock';
@@ -6,7 +7,7 @@ initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs';
 import * as db from './store.mjs';
-import * as cloud from './google.mjs?v=20261102mobile';
+import * as cloud from './google.mjs?v=20261109preflight';
 import {openPhotoViewer} from './viewer.mjs?v=20261028gallery';
 cloud.warmup();
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
@@ -183,19 +184,43 @@ async function parseImport(file){
 function renderMapping(){
  const state=importState,sheet=state.workbook.sheets[state.index];const colCount=Math.max(1,...sheet.rows.map(r=>r.cells.length));const header=sheet.rows.find(r=>r.number===state.map.row)?.cells||[];
  const options=(chosen,optional=false)=>(optional?'<option value="-1">ไม่ระบุ</option>':'')+Array.from({length:colCount},(_,i)=>`<option value="${i}" ${Number(chosen)===i?'selected':''}>${String.fromCharCode(65+i)} · ${esc(String(header[i]||'คอลัมน์ '+(i+1)).slice(0,55))}</option>`).join('');
- openModal(modalHeader('ตรวจสอบข้อมูลก่อนนำเข้า')+`<div class="modal-body"><div class="file-summary">${icon('file')}<div><b>${esc(state.file.name)}</b><small>${size(state.file.size)} · ${state.workbook.sheets.length} แท็บ · เก็บข้อมูลต้นฉบับทุกแท็บ</small></div></div><div class="grid2"><label class="field">แท็บที่ใช้สร้างคิวถ่ายรูป<select id="source-sheet">${state.workbook.sheets.map((s,i)=>`<option value="${i}" ${state.index===i?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label><label class="field">เลขแถวหัวตาราง<input id="header-row" type="number" min="1" max="${Math.max(...sheet.rows.map(r=>r.number))}" value="${state.map.row}"></label></div><div class="import-mapping"><label class="field">Item Code *<select id="map-code">${options(state.map.code)}</select></label><label class="field">ชื่อสินค้า *<select id="map-name">${options(state.map.name)}</select></label><label class="field">วัตถุประสงค์<select id="map-purpose">${options(state.map.purpose,true)}</select></label></div><div id="mapping-preview"></div><p class="help">รายการต้องมีรหัสและชื่อสินค้า • รหัสซ้ำในแท็บเดียวกันรวมเป็นงานถ่าย 1 รายการ แต่ข้อมูลต้นฉบับทุกแถวยังเก็บครบ</p></div><div class="modal-footer"><small id="import-summary"></small><button id="confirm-import" class="primary">${icon('import')}นำเข้ารายการ</button></div>`);
+ openModal(modalHeader('ตรวจสอบข้อมูลก่อนนำเข้า')+`<div class="modal-body"><div class="file-summary">${icon('file')}<div><b>${esc(state.file.name)}</b><small>${size(state.file.size)} · ${state.workbook.sheets.length} แท็บ · เก็บข้อมูลต้นฉบับทุกแท็บ</small></div></div><div class="grid2"><label class="field">แท็บที่ใช้สร้างคิวถ่ายรูป<select id="source-sheet">${state.workbook.sheets.map((s,i)=>`<option value="${i}" ${state.index===i?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label><label class="field">เลขแถวหัวตาราง<input id="header-row" type="number" min="1" max="${Math.max(...sheet.rows.map(r=>r.number))}" value="${state.map.row}"></label></div><div class="import-mapping"><label class="field">Item Code *<select id="map-code">${options(state.map.code)}</select></label><label class="field">ชื่อสินค้า *<select id="map-name">${options(state.map.name)}</select></label><label class="field">วัตถุประสงค์<select id="map-purpose">${options(state.map.purpose,true)}</select></label></div><div id="import-code-check" class="import-code-check" aria-live="polite"></div><div class="actions import-check-actions"><button id="recheck-import-codes" type="button">ตรวจ Item code อีกครั้ง</button><button id="replace-import-file" type="button">เลือกไฟล์ใหม่</button></div><div id="mapping-preview"></div><p class="help">รายการต้องมีรหัสและชื่อสินค้า • รหัสซ้ำในแท็บเดียวกันรวมเป็นงานถ่าย 1 รายการ แต่ข้อมูลต้นฉบับทุกแถวยังเก็บครบ</p></div><div class="modal-footer"><small id="import-summary"></small><button id="confirm-import" class="primary">${icon('import')}นำเข้ารายการ</button></div>`);
  $('#source-sheet').onchange=e=>{state.index=Number(e.target.value);state.map={...state.workbook.sheets[state.index].header};renderMapping();};
  $('#header-row').onchange=e=>{if(!e.target.checkValidity())return e.target.reportValidity();state.map.row=Number(e.target.value);renderMapping();};
  for(const k of ['code','name','purpose'])$('#map-'+k).onchange=e=>{state.map[k]=Number(e.target.value);mappingPreview();};
- $('#confirm-import').onclick=()=>run(commitImport);mappingPreview();
+ $('#confirm-import').onclick=()=>run(commitImport);$('#recheck-import-codes').onclick=()=>{state.checkSignature='';mappingPreview();};$('#replace-import-file').onclick=openImport;mappingPreview();
 }
 function mappingPreview(){
- const result=mappedProducts(importState.workbook.sheets[importState.index].rows,importState.map);importState.result=result;
- $('#mapping-preview').innerHTML=`<div class="preview-table"><table><thead><tr><th>แถว</th><th>ITEM CODE</th><th>ชื่อสินค้า</th><th>วัตถุประสงค์</th></tr></thead><tbody>${result.products.slice(0,8).map(p=>`<tr><td>${p.sourceRow}</td><td class="code">${esc(p.code)}</td><td>${esc(p.name)}</td><td>${esc(p.purpose)}</td></tr>`).join('')||'<tr><td colspan="4">ไม่พบรายการ กรุณาตรวจแถวหัวตารางและคอลัมน์</td></tr>'}</tbody></table></div>`;
- $('#import-summary').textContent=result.products.length+' รายการ · รหัสซ้ำ '+result.duplicates+' · ข้ามแถวไม่ครบ '+result.skipped;$('#confirm-import').disabled=!result.products.length||importState.map.code===importState.map.name;
+ const state=importState;if(!state)return;
+ const result=mappedProducts(state.workbook.sheets[state.index].rows,state.map);state.result=result;
+ const signature=JSON.stringify(result.products.map(p=>p.code));
+ const mapped=result.products.length>0&&state.map.code!==state.map.name;
+ if(!mapped){state.checkSignature=signature;state.codeCheck=null;state.checkError='';state.checking=false;state.checkRequest=(state.checkRequest||0)+1;}
+ if(mapped&&state.checkSignature!==signature){state.checkSignature=signature;state.codeCheck=null;state.checkError='';state.checking=true;checkImportCodes(state,signature);}
+ const review=reviewImportProducts(result.products,state.codeCheck);
+ const box=$('#import-code-check');box.className='import-code-check '+(state.checking?'checking':review.valid?'passed':'failed');
+ box.innerHTML=state.checking?'<b>กำลังตรวจ Item code และ Location…</b><p>ตรวจจากชีตสต็อกล่าสุดก่อนนำเข้า</p>':!mapped?'<b>เลือกคอลัมน์ Item code และชื่อสินค้าให้ถูกต้อง</b>':!review.readable?'<b>ยังตรวจสอบ Item code ไม่สำเร็จ</b><p>'+esc(state.checkError||review.warnings.join(' · ')||review.message)+'</p>':review.missing.length?'<b>กรุณาตรวจสอบ Item code · ไม่พบ '+review.missing.length+' รายการ</b><p>แก้รหัสในไฟล์ให้ตรงกับรหัสเต็มในสต็อก รวมตัวอักษรหรือรหัสสีท้าย Item code แล้วเลือกไฟล์ใหม่</p>':'<b>ตรวจพบ Item code ครบ '+result.products.length+' รายการ</b><p>'+ (review.noLocation.length?'พบรหัสแต่ยังไม่มี Location '+review.noLocation.length+' รายการ · ตรวจข้อมูลตำแหน่งในชีตสต็อก':'พร้อมนำเข้า · แสดง Location ตามชีตสต็อก')+'</p>';
+ $('#mapping-preview').innerHTML='<div class="preview-table import-stock-preview"><table><thead><tr><th>แถว</th><th>ITEM CODE</th><th>ชื่อสินค้า</th><th>ผลตรวจ / Location</th></tr></thead><tbody>'+review.items.map(p=>'<tr class="'+(p.status==='missing'?'import-code-missing':'')+'"><td>'+p.sourceRow+'</td><td class="code">'+esc(p.code)+'</td><td>'+esc(p.name)+'</td><td>'+(state.checking?'กำลังตรวจสอบ…':p.status==='missing'?'<strong class="import-code-error">กรุณาตรวจสอบ Item code</strong><small>ไม่พบรหัสนี้ในสต็อก</small>':p.status==='found'?(p.locations?.length?p.locations.map(esc).join('<br>'):'<span class="import-location-empty">พบ Item code · ยังไม่มี Location</span>'):'รอตรวจสอบ')+'</td></tr>').join('')+'</tbody></table></div>';
+ $('#import-summary').textContent=result.products.length+' รายการ · รหัสซ้ำ '+result.duplicates+' · ข้ามแถวไม่ครบ '+result.skipped;
+ $('#confirm-import').disabled=!mapped||state.checking||!review.valid;
+ $('#recheck-import-codes').disabled=!mapped||state.checking;
+}
+async function checkImportCodes(state,signature){
+ const request=state.checkRequest=(state.checkRequest||0)+1;
+ try{
+  if(!cloud.connected()){await cloud.connect(settings);updateConnection();}
+  const check=await cloud.validateItems(state.result.products.map(p=>p.code));
+  if(importState!==state||state.checkSignature!==signature||state.checkRequest!==request)return;
+  state.codeCheck=check;
+ }catch(e){if(importState!==state||state.checkSignature!==signature||state.checkRequest!==request)return;state.checkError=e.message;}
+ if(importState===state&&state.checkSignature===signature&&state.checkRequest===request){state.checking=false;mappingPreview();}
 }
 async function commitImport(){
  const s=importState;if(!s?.result.products.length||s.map.code===s.map.name)throw Error('กรุณาตรวจคอลัมน์ก่อนนำเข้า');
+ busy('กำลังตรวจ Item code กับสต็อกล่าสุดก่อนนำเข้า');
+ const check=await cloud.validateItems(s.result.products.map(p=>p.code));
+ if(importState!==s)return;s.codeCheck=check;s.checking=false;mappingPreview();
+ requireValidImport(s.result.products,check);
  const id=uid(),now=stamp(),batch={id,name:s.file.name,file:s.file,createdAt:now,fingerprint:s.fingerprint,workbook:s.workbook,count:s.result.products.length,synced:false};
  const added=s.result.products.map(p=>({...p,id:uid(),createdAt:now,importId:id,sourceSheet:s.workbook.sheets[s.index].name,photos:{},fields:{photographer:settings.photographer||''},dimensions:{},dirty:true}));
  busy('กำลังบันทึกรายการในเครื่อง');await db.commitImport(batch,added);closeModal();await reloadLocal();filter='all';query='';batchFilter=id;page=1;location.hash='products';renderProducts();toast('นำเข้า '+added.length+' รายการแล้ว');
@@ -280,7 +305,7 @@ function openReportPicker(only){
 
 function choiceControl(kind,value){const values=[...new Set([...workspace.options.filter(r=>r[0]===kind).map(r=>r[1]),...(value?[value]:[])])];return '<span class="choice-control"><select id="'+kind+'" '+(kind==='remark'?'data-field="remark"':'')+'><option value="">เลือก'+(kind==='remark'?' Remark':'ชื่อผู้ถ่าย')+'</option>'+values.map(v=>'<option '+(v===value?'selected':'')+' value="'+esc(v)+'">'+esc(v)+'</option>').join('')+'</select><button type="button" data-option-add="'+kind+'" aria-label="เพิ่ม '+kind+'">+</button><button type="button" data-option-remove="'+kind+'" aria-label="ลบตัวเลือก '+kind+'">−</button></span>';}
 function bindChoices(){main.querySelectorAll('[data-option-add],[data-option-remove]').forEach(b=>b.onclick=()=>{const kind=b.dataset.optionAdd||b.dataset.optionRemove,remove=!!b.dataset.optionRemove,value=$('#'+kind).value;if(remove&&!value)return;openModal(modalHeader(remove?'ลบตัวเลือกจากรายการร่วม':'เพิ่มตัวเลือกสำหรับทุกเครื่อง')+'<div class="modal-body"><p>ตัวเลือกนี้ใช้ร่วมกันทุกเครื่อง การลบไม่เปลี่ยนข้อมูลที่เคยบันทึก</p><input id="option-value" maxlength="500" value="'+esc(remove?value:'')+'" '+(remove?'readonly':'')+'><button id="option-save" class="primary">'+(remove?'ลบตัวเลือก':'บันทึก')+'</button></div>');$('#option-save').onclick=()=>run(async()=>{if(!cloud.connected())throw Error('เชื่อมต่อ Google ก่อน');workspace.options=await cloud.changeOption(kind,$('#option-value').value,remove?'remove':'add');await saveDraft();closeModal();renderDetail();});});}
-function listMetadata(p){const d=workspace.data.find(d=>d.id===p.id),key=v=>String(v||'').trim().toUpperCase(),stock=workspace.stock.rows.filter(r=>key(r.code)===key(p.code));return '<div class="help">'+([...new Set(stock.map(r=>r.company+' · '+r.location))].map(esc).join('<br>')||'—')+'</div>';}
+function listMetadata(p){const stock=workspace.stock.rows.filter(r=>itemCodeKey(r.code)===itemCodeKey(p.code)),locations=[...new Set(stock.filter(r=>String(r.location||'').trim()).map(r=>r.company+' · '+r.location))];return '<div class="help">'+(locations.length?locations.map(esc).join('<br>'):stock.length?'<span class="import-location-empty">พบ Item code · ยังไม่มี Location</span>':!workspace.stock.checkedAt||!workspace.stock.rows.length||workspace.stock.warnings?.length?'<span>ยังตรวจ Location ไม่สำเร็จ</span>':'<strong class="import-code-error">กรุณาตรวจสอบ Item code</strong>')+'</div>';}
 
 function summaryRows(){return products.filter(p=>!p.demo).map(p=>{const d=workspace.data.find(d=>d.id===p.id),raw=d?.requestDate||'',m=raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/),day=summaryFilter.date==='request'?(m?m[3]+'-'+m[2]+'-'+m[1]:raw.slice(0,10)):new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(p.createdAt));return {...p,requester:d?.requester||'ไม่ระบุ',day};}).filter(p=>(!summaryFilter.file||p.importId===summaryFilter.file)&&(!summaryFilter.requester||p.requester===summaryFilter.requester)&&(!summaryFilter.status||status(p)===summaryFilter.status)&&(!summaryFilter.from||p.day>=summaryFilter.from)&&(!summaryFilter.to||p.day<=summaryFilter.to));}
 function renderSummary(){

@@ -1,6 +1,7 @@
 import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261026viewer';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
 import * as db from './store.mjs';
+import {requireValidImport} from './import-check.mjs';
 let config=null,online=false,title='';
 export const hosted=()=>!!globalThis.google?.script?.run;
 export const connected=()=>online&&(hosted()||bridgeAlive());
@@ -23,6 +24,8 @@ export async function syncImport(batch,products,onProgress=()=>{}){
  assertSheet(batch);
  const imports=await readTable('PIM_Imports');
  if(imports.some(r=>r[0]===batch.id)){await syncData(batch.id);batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);return;}
+ onProgress('กำลังตรวจ Item code กับสต็อกล่าสุดก่อนนำเข้า');
+ requireValidImport(products,await validateItems(products.map(p=>p.code)));
  onProgress('เก็บไฟล์ต้นฉบับใน Drive ผ่าน Apps Script');
  batch.driveId=await upload(batch.file,{key:'import-'+batch.id,kind:'import',name:batch.name});await db.put('imports',batch);
  const source={properties:batch.workbook.properties,sheetProperties:batch.workbook.sheetProperties,names:batch.workbook.names,sheets:batch.workbook.sheets.map(s=>({name:s.name,range:s.range,merges:s.merges,cells:s.cells}))};
@@ -51,6 +54,10 @@ export async function saveProduct(p,onProgress=()=>{}){
 }
 export async function itemHistory(code){return rpc('itemHistory',{code});}
 export async function stock(code){return rpc('stock',{code});}
+export async function validateItems(codes){
+ if(!codes.length||codes.length>5000)throw Error('นำเข้าได้ครั้งละไม่เกิน 5,000 Item code');
+ return rpc('validateItems',{codes});
+}
 export async function selectRevision(p,revisionId){assertSheet(p);const r=await rpc('selectRevision',{productId:p.id,revisionId});const history=await itemHistory(p.code);applyRevision(p,r.revision,history);p.syncedAt=r.at;await db.put('products',p);return p;}
 export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
 export async function loadProducts(snapshot){

@@ -46,9 +46,9 @@ export function prepareBridge(usePopup=false){
  });
  readyPromise=promise;promise.then(()=>{if(readyPromise===promise)readyPromise=null;},()=>{if(readyPromise===promise)readyPromise=null;});return promise;
 }
-export async function bridgeCall(request){
+export async function bridgeCall(request,timeoutMs=180000){
  await prepareBridge();return new Promise((resolve,reject)=>{
-  const id=crypto.randomUUID(),timer=setTimeout(()=>{pending.delete(id);peer=null;reject(connectionError('Google ใช้เวลาตอบนาน ระบบจะเชื่อมกลับอัตโนมัติ ข้อมูลฉบับร่างยังอยู่'));},180000);
+  const id=crypto.randomUUID(),timer=setTimeout(()=>{pending.delete(id);peer=null;reject(connectionError('Google ใช้เวลาตอบนาน ระบบจะเชื่อมกลับอัตโนมัติ ข้อมูลฉบับร่างยังอยู่'));},timeoutMs);
   pending.set(id,{resolve,reject,timer});
   try{peer.postMessage({type:'pim-request',channel,id,request},peerOrigin);}catch{clearTimeout(timer);pending.delete(id);peer=null;reject(connectionError('การเชื่อมต่อขาดชั่วคราว ระบบจะลองใหม่'));}
  });

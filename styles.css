@@ -149,3 +149,9 @@ dialog:has(.report-wizard) .modal-head{position:sticky;top:0;z-index:3;backgroun
 .save-dock{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,340px) auto;align-items:end;gap:18px}.save-dock .dock-info{min-width:0;align-self:center}.save-dock .dock-photographer{min-width:0;margin:0;gap:7px}.save-dock .dock-photographer select{width:100%;min-height:48px;font-size:16px}.save-dock #save-cloud{min-height:48px;width:auto;white-space:nowrap}.save-dock .choice-control{min-width:0}.save-dock .choice-control button{padding:8px;flex-shrink:0}
 @media(max-width:1100px){.save-dock{grid-template-columns:minmax(0,1fr) auto;align-items:end}.save-dock .dock-info{grid-column:1/-1}.save-dock .dock-photographer{grid-column:1}.save-dock #save-cloud{grid-column:2}}
 @media(max-width:600px){.save-dock{grid-template-columns:minmax(0,1fr);gap:14px}.save-dock .dock-info,.save-dock .dock-photographer,.save-dock #save-cloud{grid-column:1/-1}.save-dock #save-cloud{width:100%}}
+
+/* Refresh state stays visible while filters keep focus. */
+.sync-status{display:flex;flex-direction:column;gap:5px;margin:16px 24px;padding:13px 16px;border:1px solid color-mix(in srgb,var(--accent,#007aff) 25%,transparent);border-radius:14px;background:color-mix(in srgb,var(--accent,#007aff) 5%,transparent);font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+.sync-status b{font-weight:600}.sync-status span{opacity:.8}.sync-status.sync-error{border-color:#ef927e;background:color-mix(in srgb,#ff5630 8%,transparent)}
+.filter-summary{margin:0;padding:0 24px 16px;font-size:12px;line-height:1.65;opacity:.8}.sync-conflict{display:grid;gap:8px;margin-top:8px;color:#bf6800;font-size:12px}.sync-conflict button{white-space:normal}
+@media(max-width:600px){.sync-status{margin:12px 16px}.filter-summary{padding:0 16px 12px}}

@@ -1,3 +1,4 @@
+import {reconcileProduct,singleFlight} from './sync.mjs?v=20261109refresh';
 import {itemCodeKey,reviewImportProducts,requireValidImport} from './import-check.mjs';
 import {selectImportSheet} from './importer.mjs?v=20261109simple';
 import {openNativeCamera,cancelNativeCamera,isMobileCameraDevice} from './camera.mjs?v=20261109native';
@@ -8,7 +9,7 @@ initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs';
 import * as db from './store.mjs';
-import * as cloud from './google.mjs?v=20261109preflight';
+import * as cloud from './google.mjs?v=20261109refresh';
 import {openPhotoViewer} from './viewer.mjs?v=20261028gallery';
 cloud.warmup();
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
@@ -19,7 +20,7 @@ let products=[],batches=[],settings={id:'config',scriptUrl:'',sheetId:''},filter
 let rankingMetric='items';
 let summaryFilter={file:'',requester:'',status:'',from:'',to:'',date:'import'};
 let brand={name:'PIM.',subtitle:'PHOTO STUDIO',logo:new URL('./assets/pim-logo.webp',import.meta.url).href};
-let workspace={options:[],data:[],stock:{rows:[]}},lastSync='',syncing=false;
+let workspace={options:[],data:[],stock:{rows:[]}},lastSync='',syncing=false,syncError='',syncResult=null,lastRefreshAttempt=0;
 const objectUrls=new Map(),photoLoads=new Map();let reportUrls=[];
 function toast(message,error=false){const t=$('#toast');t.textContent=message;t.className='show'+(error?' error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.className='',6500);}
 function busy(message){$('#busy').hidden=!message;$('#busy-label').textContent=message||'';const report=$('#pdf-progress');if(report&&message){const percent=Number(message.match(/(\d+)%/)?.[1]||0);report.innerHTML='<p>'+esc(message)+'</p><progress max="100" value="'+percent+'" aria-label="ความคืบหน้าสร้าง PDF"></progress>';}}
@@ -58,21 +59,23 @@ async function route(){cancelNativeCamera();await reloadLocal();const r=location
 window.addEventListener('hashchange',()=>route().catch(e=>toast(e.message,true)));
 function stats(){const counts={waiting:0,progress:0,complete:0};products.forEach(p=>counts[status(p)]++);return `<div class="stats">${[['สินค้าทั้งหมด',products.length,'box'],['รอถ่ายรูป',counts.waiting,'clock'],['กำลังดำเนินการ',counts.progress,'camera'],['ถ่ายครบแล้ว',counts.complete,'check']].map(([label,n,i])=>`<div class="stat"><div><small>${label}</small><strong>${n.toLocaleString()}</strong></div><span class="stat-icon">${icon(i)}</span></div>`).join('')}</div>`;}
 function renderProducts(){
- main.innerHTML=title('YOUR PRODUCT WORKSPACE','รายการสินค้า','จัดการงานถ่ายรูปสินค้า ตั้งแต่นำเข้าไฟล์จนถึงภาพครบทุกมุม',`<button id="export-pdf">${icon('file')}Export PDF</button><button id="export-excel">${icon('export')}Excel · เปิดรูปได้</button><button id="export">CSV</button><button class="primary" id="import">${icon('import')}Import File</button>`)+stats()+`<section class="panel"><div class="panel-head"><h2>Product List <span class="badge neutral">${products.length} รายการ</span></h2><button class="ghost small" id="refresh">${icon('refresh')}รีเฟรชจากชีต</button></div><p class="help" style="padding:0 24px">อัปเดตอัตโนมัติทุก 1 นาที · ล่าสุด ${fmtDate(lastSync)}</p><div class="tabs" aria-label="กรองสถานะ">${[['all','ทั้งหมด'],['waiting','รอถ่ายรูป'],['progress','กำลังดำเนินการ'],['complete','ถ่ายครบแล้ว']].map(([id,label])=>`<button data-filter="${id}" class="${filter===id?'active':''}">${label} <span>${id==='all'?products.length:products.filter(p=>status(p)===id).length}</span></button>`).join('')}</div><div class="toolbar product-filters"><label class="field">ค้นหาสินค้า<div class="search">${icon('search')}<input id="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหา Item Code หรือชื่อสินค้า..." value="${esc(query)}"></div></label><label class="field">ไฟล์นำเข้า<select id="batch-filter" aria-label="กรองไฟล์นำเข้า"><option value="">ไฟล์นำเข้าทั้งหมด</option>${batches.map(b=>`<option value="${b.id}" ${batchFilter===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label><label class="field">วันที่อัปโหลด · จาก<input type="date" id="import-from" aria-label="วันที่อัปโหลดเริ่มต้น" value="${esc(importFrom)}" max="${esc(importTo)}"></label><label class="field">ถึงวันที่<input type="date" id="import-to" aria-label="วันที่อัปโหลดสิ้นสุด" value="${esc(importTo)}" min="${esc(importFrom)}"></label><button id="reset-product-filters" class="filter-reset">ล้างตัวกรอง</button><button id="delete-filter-batch" class="danger" ${batchFilter?'':'disabled'}>ลบไฟล์นี้</button></div><div id="table-area"></div></section>`;
+ main.innerHTML=title('YOUR PRODUCT WORKSPACE','รายการสินค้า','จัดการงานถ่ายรูปสินค้า ตั้งแต่นำเข้าไฟล์จนถึงภาพครบทุกมุม',`<button id="export-pdf">${icon('file')}Export PDF</button><button id="export-excel">${icon('export')}Excel · เปิดรูปได้</button><button id="export">CSV</button><button class="primary" id="import">${icon('import')}Import File</button>`)+stats()+`<section class="panel"><div class="panel-head"><h2>Product List <span class="badge neutral">${products.length} รายการ</span></h2><button class="ghost small" id="refresh">${icon('refresh')}รีเฟรชจากชีต</button></div><div id="sync-status" class="sync-status" role="status" aria-live="polite"></div><div class="tabs" aria-label="กรองสถานะ">${[['all','ทั้งหมด'],['waiting','รอถ่ายรูป'],['progress','กำลังดำเนินการ'],['complete','ถ่ายครบแล้ว']].map(([id,label])=>`<button data-filter="${id}" class="${filter===id?'active':''}">${label} <span>${id==='all'?products.length:products.filter(p=>status(p)===id).length}</span></button>`).join('')}</div><div class="toolbar product-filters"><label class="field">ค้นหาสินค้า<div class="search">${icon('search')}<input id="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหา Item Code หรือชื่อสินค้า..." value="${esc(query)}"></div></label><label class="field">ไฟล์นำเข้า<select id="batch-filter" aria-label="กรองไฟล์นำเข้า"><option value="">ไฟล์นำเข้าทั้งหมด</option>${batches.map(b=>`<option value="${b.id}" ${batchFilter===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label><label class="field">วันที่อัปโหลด · จาก<input type="date" id="import-from" aria-label="วันที่อัปโหลดเริ่มต้น" value="${esc(importFrom)}" max="${esc(importTo)}"></label><label class="field">ถึงวันที่<input type="date" id="import-to" aria-label="วันที่อัปโหลดสิ้นสุด" value="${esc(importTo)}" min="${esc(importFrom)}"></label><button id="reset-product-filters" class="filter-reset">ล้างตัวกรอง</button><button id="delete-filter-batch" class="danger" ${batchFilter?'':'disabled'}>ลบไฟล์นี้</button></div><p id="filter-summary" class="filter-summary"></p><div id="table-area"></div></section>`;
  $('#delete-filter-batch').onclick=()=>openDeleteImport(batchFilter);$('#reset-product-filters').onclick=()=>{query='';batchFilter='';importFrom='';importTo='';filter='all';page=1;renderProducts();};$('#import').onclick=openImport;$('#export').onclick=()=>run(()=>exportCSV());$('#export-excel').onclick=()=>run(()=>exportCSV('xlsx'));$('#export-pdf').onclick=()=>openReportPicker();$('#refresh').onclick=()=>run(refreshCloud);
  $('#search').oninput=e=>{query=e.target.value;page=1;renderTable();};
  $('#batch-filter').onchange=e=>{batchFilter=e.target.value;page=1;$('#delete-filter-batch').disabled=!batchFilter;renderTable();};
  for(const [id,isFrom] of [['import-from',true],['import-to',false]])$('#'+id).onchange=e=>{const value=e.target.value;if(isFrom)importFrom=value;else importTo=value;$('#import-from').max=importTo;$('#import-to').min=importFrom;page=1;renderTable();};
- main.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;page=1;renderProducts();});renderTable();
+ main.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;page=1;renderProducts();});renderTable();updateSyncStatus();
 }
 function filteredProducts(){return products.filter(p=>(filter==='all'||status(p)===filter)&&(!batchFilter||p.importId===batchFilter)&&(!query||(p.code+' '+p.name).toLowerCase().includes(query.toLowerCase()))&&inImportRange(p,batches,importFrom,importTo));}
 function renderTable(){
  const match=filteredProducts();
+ const summary=$('#filter-summary');if(summary)summary.textContent=(batchFilter||query||importFrom||importTo||filter!=='all')?'กำลังใช้ตัวกรอง · แสดง '+match.length+' จากทั้งหมด '+products.length+' รายการ — กดล้างตัวกรองเพื่อดูทุกงาน':'แสดงงานจากทุกไฟล์นำเข้า';
  const pages=Math.max(1,Math.ceil(match.length/10));page=Math.min(page,pages);const shown=match.slice((page-1)*10,page*10);
- $('#table-area').innerHTML=shown.length?`<div class="table-wrap"><table class="product-table"><thead><tr><th style="width:65px">NO.</th><th>ITEM CODE / PRODUCT</th><th>Location</th><th>ชื่อผู้ขอ / วัตถุประสงค์</th><th>ภาพถ่าย</th><th>สถานะ</th><th style="width:230px"></th></tr></thead><tbody>${shown.map((p,i)=>{const n=progress(p);return `<tr><td style="color:#a0acb7">${String((page-1)*10+i+1).padStart(2,'0')}</td><td><div class="product-cell"><div class="product-placeholder list-photo">${p.photos?.top?.[0]?`<img data-list-product="${p.id}" alt="Top view 1 · ${esc(p.code)}" loading="lazy">`:icon('box')}</div><div><a href="#product/${p.id}" class="code product-item-code">${String(p.code).trim().split(/\s+/).map(part=>'<span class="item-code-part">'+esc(part)+'</span>').join(' ')}</a><div class="product-name">${esc(p.name)}</div></div></div></td><td>${listMetadata(p)}</td><td><b class="product-requester">${esc(workspace.data.find(d=>d.id===p.id)?.requester||'—')}</b><div class="product-name product-purpose" title="${esc(p.purpose)}">${esc(p.purpose||'—')}</div></td><td><span class="progress-count">${n.required} / 7 มุม <span style="color:#a6b1b9">· ${n.total} รูป</span></span><div class="progress-track"><i style="width:${n.required/7*100}%"></i></div></td><td>${badge(p)}${p.dirty?'<div class="draft-indicator">มีฉบับร่างที่ยังไม่บันทึก</div>':''}</td><td><div class="product-row-actions"><button class="small" data-view="${p.id}" ${n.total?'':'disabled'} aria-label="ดูรูป ${esc(p.code)}">${icon('image')}ดูรูป</button><button class="small" data-open="${p.id}">${icon('camera')}${n.total?'จัดการรูป':'เริ่มถ่าย'}</button></div></td></tr>`;}).join('')}</tbody></table></div><div class="pagination"><span>แสดง ${(page-1)*10+1}–${Math.min(page*10,match.length)} จาก ${match.length.toLocaleString()} รายการ</span><div class="actions"><button id="prev" aria-label="หน้าก่อน" ${page===1?'disabled':''}>‹</button><span>${page} / ${pages}</span><button id="next" aria-label="หน้าถัดไป" ${page===pages?'disabled':''}>›</button></div></div>`:`<div class="empty"><div class="empty-illustration">${icon(products.length?'search':'camera')}</div><h3>${products.length?'ไม่พบสินค้าที่ค้นหา':'เริ่มต้นงานถ่ายรูปชุดแรกของคุณ'}</h3><p>${products.length?'ลองเปลี่ยนคำค้นหาหรือตัวกรอง':'นำเข้าไฟล์ Excel แบบฟอร์มขอรูปถ่ายสินค้า<br>แล้วเลือกสินค้าเพื่อถ่ายรูปให้ครบทั้ง 7 มุมที่จำเป็น'}</p><button id="empty-import" class="primary">${icon('import')}Import File</button>${!products.length?'<br><button class="ghost text-link" id="demo">ทดลองหน้าถ่ายรูปด้วยข้อมูลสมมติ →</button>':''}</div>`;
+ $('#table-area').innerHTML=shown.length?`<div class="table-wrap"><table class="product-table"><thead><tr><th style="width:65px">NO.</th><th>ITEM CODE / PRODUCT</th><th>Location</th><th>ชื่อผู้ขอ / วัตถุประสงค์</th><th>ภาพถ่าย</th><th>สถานะ</th><th style="width:230px"></th></tr></thead><tbody>${shown.map((p,i)=>{const n=progress(p);return `<tr><td style="color:#a0acb7">${String((page-1)*10+i+1).padStart(2,'0')}</td><td><div class="product-cell"><div class="product-placeholder list-photo">${p.photos?.top?.[0]?`<img data-list-product="${p.id}" alt="Top view 1 · ${esc(p.code)}" loading="lazy">`:icon('box')}</div><div><a href="#product/${p.id}" class="code product-item-code">${String(p.code).trim().split(/\s+/).map(part=>'<span class="item-code-part">'+esc(part)+'</span>').join(' ')}</a><div class="product-name">${esc(p.name)}</div></div></div></td><td>${listMetadata(p)}</td><td><b class="product-requester">${esc(workspace.data.find(d=>d.id===p.id)?.requester||'—')}</b><div class="product-name product-purpose" title="${esc(p.purpose)}">${esc(p.purpose||'—')}</div></td><td><span class="progress-count">${n.required} / 7 มุม <span style="color:#a6b1b9">· ${n.total} รูป</span></span><div class="progress-track"><i style="width:${n.required/7*100}%"></i></div></td><td>${badge(p)}${p.dirty?'<div class="draft-indicator">ฉบับร่างในเครื่องนี้ · ยังไม่บันทึกลงชีต</div>':''}${p.remoteUpdate?'<div class="sync-conflict">ชีตมีข้อมูลชุดใหม่ <button class="small" data-cloud-view="'+p.id+'">ดูรูปจากชีต</button></div>':''}</td><td><div class="product-row-actions"><button class="small" data-view="${p.id}" ${n.total?'':'disabled'} aria-label="ดูรูป ${esc(p.code)}">${icon('image')}ดูรูป</button><button class="small" data-open="${p.id}">${icon('camera')}${n.total?'จัดการรูป':'เริ่มถ่าย'}</button></div></td></tr>`;}).join('')}</tbody></table></div><div class="pagination"><span>แสดง ${(page-1)*10+1}–${Math.min(page*10,match.length)} จาก ${match.length.toLocaleString()} รายการ</span><div class="actions"><button id="prev" aria-label="หน้าก่อน" ${page===1?'disabled':''}>‹</button><span>${page} / ${pages}</span><button id="next" aria-label="หน้าถัดไป" ${page===pages?'disabled':''}>›</button></div></div>`:`<div class="empty"><div class="empty-illustration">${icon(products.length?'search':'camera')}</div><h3>${products.length?'ไม่พบสินค้าที่ค้นหา':'เริ่มต้นงานถ่ายรูปชุดแรกของคุณ'}</h3><p>${products.length?'ลองเปลี่ยนคำค้นหาหรือตัวกรอง':'นำเข้าไฟล์ Excel แบบฟอร์มขอรูปถ่ายสินค้า<br>แล้วเลือกสินค้าเพื่อถ่ายรูปให้ครบทั้ง 7 มุมที่จำเป็น'}</p><button id="empty-import" class="primary">${icon('import')}Import File</button>${!products.length?'<br><button class="ghost text-link" id="demo">ทดลองหน้าถ่ายรูปด้วยข้อมูลสมมติ →</button>':''}</div>`;
  $('#prev')?.addEventListener('click',()=>{page--;renderTable();});$('#next')?.addEventListener('click',()=>{page++;renderTable();});main.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>location.hash='product/'+b.dataset.open);$('#empty-import')?.addEventListener('click',openImport);$('#demo')?.addEventListener('click',()=>run(addDemo));
  main.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.view);if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl});});
  main.querySelectorAll('#table-area tbody tr').forEach(row=>[...row.children].forEach((cell,i)=>cell.dataset.label=['ลำดับ','สินค้า','Location','ผู้ขอ / วัตถุประสงค์','ภาพถ่าย','สถานะ',''][i]));
+ main.querySelectorAll('[data-cloud-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.cloudView)?.remoteUpdate;if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl});});
  hydrateListPhotos();
 }
 async function addDemo(){let p=products.find(p=>p.demo);if(!p){p={id:uid(),code:'DEMO-001',name:'สินค้าตัวอย่างสำหรับทดลองถ่ายรูป',purpose:'ข้อมูลสมมติ • ทดลองใช้งาน',demo:true,createdAt:stamp(),photos:{},fields:{},dimensions:{},dirty:true};await db.put('products',p);}location.hash='product/'+p.id;}
@@ -142,22 +145,45 @@ async function loadStock(p){
  }catch(e){if(target.isConnected)target.textContent=e.message;}
 }
 async function saveCloud(){if(current.demo)throw Error('ข้อมูลสมมติใช้ทดลองในเครื่องเท่านั้น กรุณานำเข้าสินค้าจริงเพื่อบันทึก');if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ในหน้าตั้งค่าก่อน');if(current.dirty||!current.baseRevision)assignPhotographer(current,currentPhotographer());await saveDraft();if(!current.fields?.photographer?.trim())throw Error('กรุณาระบุชื่อผู้ถ่ายก่อนบันทึก');const p=current;await photoUploads.get(p.id);await cloud.saveProduct(p,(message,percent)=>{busy(message+(Number.isFinite(percent)?' · '+percent+'%':''));uploadStatus(message,percent);});uploadStatus('บันทึกลง Google สำเร็จ',100);location.hash='products';await refreshCloud(true);toast('อัปโหลดและบันทึกสำเร็จ 100%');}
-async function refreshCloud(silent=false){
- if(syncing||!cloud.connected()){if(!silent)toast('กรุณาเชื่อมต่อ Google ก่อน');return;}syncing=true;
+function updateSyncStatus(){
+ const button=$('#refresh');if(button){button.disabled=syncing;button.innerHTML=icon('refresh')+(syncing?'กำลังดึงข้อมูลล่าสุด…':'รีเฟรชจากชีต');}
+ const box=$('#sync-status');if(!box)return;
+ box.classList.toggle('sync-error',!!syncError);
+ box.innerHTML=syncing?'<b>กำลังอ่านข้อมูลล่าสุดจากชีต…</b>':syncError?'<b>รีเฟรชไม่สำเร็จ · ยังแสดงข้อมูลครั้งก่อน</b><span>'+esc(syncError)+'</span>':'<b>'+(lastSync?'ซิงก์สำเร็จล่าสุด '+fmtDate(lastSync):'กำลังรอข้อมูลจากชีต')+'</b><span>ตรวจอัปเดตทุก 30 วินาที และเมื่อกลับเข้าแอป'+(syncResult?' · ดึงจากชีต '+syncResult.total+' รายการ':'')+'</span>';
+ if(syncResult?.drafts)box.innerHTML+='<span>เก็บฉบับร่างที่แก้ไขจริงในเครื่อง '+syncResult.drafts+' รายการ'+(syncResult.conflicts?' · '+syncResult.conflicts+' รายการมีข้อมูลใหม่จากชีต เปิด “ดูรูปจากชีต” เพื่อเทียบได้':'')+'</span>';
+}
+function refreshProductView(){
+ if(!$('#table-area'))return;
+ const cards=main.querySelector('.stats');if(cards)cards.outerHTML=stats();
+ const count=main.querySelector('.panel-head h2 .badge');if(count)count.textContent=products.length+' รายการ';
+ const labels={all:'ทั้งหมด',waiting:'รอถ่ายรูป',progress:'กำลังดำเนินการ',complete:'ถ่ายครบแล้ว'};
+ main.querySelectorAll('[data-filter]').forEach(b=>{const id=b.dataset.filter;b.innerHTML=labels[id]+' <span>'+(id==='all'?products.length:products.filter(p=>status(p)===id).length)+'</span>';});
+ const select=$('#batch-filter');if(select&&document.activeElement!==select){select.innerHTML='<option value="">ไฟล์นำเข้าทั้งหมด</option>'+batches.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('');if(!batches.some(b=>b.id===batchFilter))batchFilter='';select.value=batchFilter;$('#delete-filter-batch').disabled=!batchFilter;}
+ renderTable();updateSyncStatus();
+}
+const pullCloud=singleFlight(async()=>{
+ syncing=true;syncError='';lastRefreshAttempt=Date.now();updateSyncStatus();
  try{
- if(current)await saveDraft();
- await reloadLocal();
- workspace=await cloud.snapshot();
- for(const entry of workspace.deletions||[]){if(batches.some(b=>b.id===entry.id)){await db.deleteBatch(entry.id);if(current?.importId===entry.id){current=null;location.hash='imports';toast('งานนี้ถูกลบจากชีตแล้ว');}}}
- await reloadLocal();let imported=false;
- for(const batch of batches.filter(b=>!b.synced&&b.file&&b.workbook)){await cloud.syncImport(batch,products.filter(p=>p.importId===batch.id),silent?()=>{}:busy);imported=true;}
- if(imported)workspace=await cloud.snapshot();lastSync=workspace.at;await db.put('settings',{id:'workspace-cache',options:workspace.options,data:workspace.data,stock:workspace.stock,at:workspace.at});if(workspace.branding){brand=workspace.branding;await db.put('settings',{id:'branding',...brand});applyBranding();}
- for(const r of workspace.imports){const old=batches.find(b=>b.id===r[0]);await db.put('imports',{...old,id:r[0],name:r[1],createdAt:r[2],driveId:r[3],count:Number(r[5]),synced:true,workbook:old?.workbook||{sheets:[]}});}
- const rows=await cloud.loadProducts(workspace);for(const p of rows){const local=await db.get('products',p.id);await db.put('products',local?.dirty?{...local,importSynced:true}:p);}
- await reloadLocal();
- if(!current&&!modal.open&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))await route();
- if(!silent)toast('ข้อมูลตรงกับชีต '+rows.length+' รายการ · เก็บรูปฉบับร่างไว้');
- }finally{syncing=false;}
+  if(!cloud.connected())await cloud.connect(settings);
+  // Refresh is read-only: a failed pending import must not block the team's updates.
+  const fresh=await cloud.snapshot(),rows=await cloud.loadProducts(fresh);
+  await reloadLocal();
+  for(const entry of fresh.deletions||[])if(batches.some(b=>b.id===entry.id)){await db.deleteBatch(entry.id);if(current?.importId===entry.id){current=null;location.hash='imports';toast('งานนี้ถูกลบจากชีตแล้ว');}}
+  for(const r of fresh.imports){const old=batches.find(b=>b.id===r[0]);await db.put('imports',{...old,id:r[0],name:r[1],createdAt:r[2],driveId:r[3],count:Number(r[5]),synced:true,workbook:old?.workbook||{sheets:[]}});}
+  const updated=await db.mergeCloudProducts(rows,(local,remote)=>reconcileProduct(local,remote,fresh.revisions),current?.id);
+  await db.put('settings',{id:'workspace-cache',options:fresh.options,data:fresh.data,stock:fresh.stock,at:fresh.at});
+  if(fresh.branding){await db.put('settings',{id:'branding',...fresh.branding});brand=fresh.branding;applyBranding();}
+  workspace=fresh;lastSync=fresh.at;await reloadLocal();
+  syncResult={total:rows.length,updated,drafts:products.filter(p=>p.dirty).length,conflicts:products.filter(p=>p.remoteUpdate).length};
+  if(!current&&!modal.open){if($('#table-area'))refreshProductView();else if(!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))await route();}
+  return syncResult;
+ }catch(e){syncError=e.message||String(e);throw e;}
+ finally{syncing=false;updateSyncStatus();updateConnection();}
+});
+async function refreshCloud(silent=false){
+ const result=await pullCloud();
+ if(!silent)toast('รีเฟรชสำเร็จ · ดึงจากชีต '+result.total+' รายการ'+(result.drafts?' · เก็บฉบับร่างในเครื่อง '+result.drafts+' รายการ':'')+(batchFilter||query||importFrom||importTo||filter!=='all'?' · มีตัวกรองเปิดอยู่':''));
+ return result;
 }
 function openImport(){importState=null;openModal(modalHeader('Import File')+`<div class="modal-body"><p class="subtext" style="margin-bottom:20px">นำเข้าแบบฟอร์มขอรูปถ่ายสินค้า แล้วตรวจรายการก่อนเริ่มงาน</p><label class="dropzone" id="dropzone" tabindex="0">${icon('import')}<strong>เลือกไฟล์ หรือลากไฟล์มาวางที่นี่</strong><small>Excel (.xlsx, .xls) หรือ CSV · สูงสุด 25 MB</small><input type="file" id="import-file" accept=".xlsx,.xls,.csv" hidden></label><div class="sync-note" style="margin-top:18px">${icon('info')}<span>ข้อมูลทุกแท็บจะถูกเก็บพร้อมไฟล์ต้นฉบับเมื่อบันทึกลง Google ระบบจะอ่านแบบฟอร์มและตรวจรายการสินค้าให้อัตโนมัติ</span></div></div>`);
  const input=$('#import-file'),zone=$('#dropzone');input.onchange=()=>input.files[0]&&run(()=>parseImport(input.files[0]));
@@ -249,11 +275,12 @@ async function exportCSV(format='csv'){
 window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||'เกิดข้อผิดพลาด กรุณาลองใหม่',true);});
 let autoConnecting=false,appReady=false,lastAutoAttempt=0;
 async function autoSync(){
- if(!appReady||autoConnecting||working||document.hidden)return;
+ if(!appReady||autoConnecting||working||current||photoUploads.size||document.hidden)return;
+ if(cloud.connected()&&Date.now()-lastRefreshAttempt<15000)return;
  if(modal.open&&cloud.connected())return;
  const reconnect=!cloud.connected();if(reconnect&&Date.now()-lastAutoAttempt<15000)return;
  autoConnecting=true;lastAutoAttempt=Date.now();updateConnection();
- try{if(reconnect){await cloud.connect(settings);window.dispatchEvent(new Event('pim-cloud-connected'));}updateConnection();if(!modal.open)await refreshCloud(true);}catch{}finally{autoConnecting=false;updateConnection();}
+ try{if(reconnect){await cloud.connect(settings);window.dispatchEvent(new Event('pim-cloud-connected'));}updateConnection();if(!modal.open)await refreshCloud(true);}catch(e){syncError=e.message||String(e);updateSyncStatus();}finally{autoConnecting=false;updateConnection();}
 }
 await (async()=>{settings=await db.get('settings','config')||settings;brand=await db.get('settings','branding')||brand;workspace=await db.get('settings','workspace-cache')||workspace;lastSync=workspace.at||'';applyBranding();cloud.configure(settings);await route();appReady=true;await autoSync();})();
 
@@ -304,7 +331,8 @@ function renderSummary(){
  $('#ranking-metric').onchange=e=>{rankingMetric=e.target.value;renderSummary();};
 }
 
-setInterval(autoSync,60000);
+setInterval(autoSync,30000);
+window.addEventListener('focus',()=>autoSync());
 setInterval(()=>{if(appReady)updateConnection();},5000);
 window.addEventListener('online',()=>{lastAutoAttempt=0;autoSync();});
 window.addEventListener('pim-google-ready',()=>{lastAutoAttempt=0;autoSync();});

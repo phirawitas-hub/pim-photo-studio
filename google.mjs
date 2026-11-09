@@ -1,4 +1,4 @@
-import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261026viewer';
+import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261109refresh';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
 import * as db from './store.mjs';
 import {requireValidImport} from './import-check.mjs';
@@ -9,9 +9,9 @@ export function configure(c){config=c;}
 export function warmup(){if(!hosted())prepareBridge().catch(()=>{});}
 export function disconnect(){online=false;resetBridge();}
 function rpc(action,payload={}){
- const request={sheetId:config?.sheetId||'',action,payload};
- if(!hosted())return bridgeCall(request).catch(e=>{if(e.code==='CONNECTION')online=false;throw e;});
- return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(e.message||String(e)))).pimCall(request));
+ const request={sheetId:config?.sheetId||'',action,payload},timeoutMs=action==='snapshot'?45000:180000;
+ if(!hosted())return bridgeCall(request,timeoutMs).catch(e=>{if(e.code==='CONNECTION')online=false;throw e;});
+ return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Google ตอบกลับช้า ยังแสดงข้อมูลเดิม กรุณารีเฟรชอีกครั้ง')),timeoutMs);google.script.run.withSuccessHandler(value=>{clearTimeout(timer);resolve(value);}).withFailureHandler(e=>{clearTimeout(timer);reject(Error(e.message||String(e)));}).pimCall(request);});
 }
 export async function connect(c,usePopup=false){configure(c);online=false;if(usePopup&&!hosted())await prepareBridge(true);const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);online=true;}
 export async function syncData(batchId){let offset=0;do{const r=await rpc('syncData',{batchId,offset});offset=r.next;}while(offset!==null);}
@@ -42,7 +42,7 @@ export async function saveProduct(p,onProgress=()=>{}){
  if(batch){assertSheet(batch);if(!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),onProgress);}
  const history=await itemHistory(p.code),latest=history.at(-1);
  if(!String(p.fields?.photographer||'').trim())throw Error('กรุณาระบุชื่อผู้ถ่าย');
- if(p.pendingRevision&&latest?.[0]===p.pendingRevision){await rpc('revision',{id:p.pendingRevision,productId:p.id});p.baseRevision=p.pendingRevision;p.itemHead=p.pendingRevision;p.revisionNumber=history.length;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
+ if(p.pendingRevision&&latest?.[0]===p.pendingRevision){await rpc('revision',{id:p.pendingRevision,productId:p.id});p.baseRevision=p.pendingRevision;p.itemHead=p.pendingRevision;p.revisionNumber=history.length;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
  if(!p.itemHead&&!p.baseRevision&&latest){p.itemHead=latest[0];await db.put('products',p);}
  if((latest?.[0]||null)!==(p.itemHead||p.baseRevision||null))throw Error('มีเวอร์ชันใหม่ในชีต กรุณาตรวจประวัติก่อนบันทึก');
  await uploadProductPhotos(p,onProgress);
@@ -50,7 +50,7 @@ export async function saveProduct(p,onProgress=()=>{}){
  const photos=Object.fromEntries(ANGLES.map(a=>[a.id,(p.photos?.[a.id]||[]).map(x=>({id:x.id,fileId:x.fileId,name:x.name||'',size:x.size||0}))]));
  onProgress('บันทึกเวอร์ชันลง Google Sheet');
  const r=await rpc('revision',{id:p.pendingRevision,productId:p.id,baseRevision:p.itemHead||p.baseRevision||null,meta:{fields:p.fields||{},dimensions:p.dimensions||{},purpose:p.purpose||''},photos});
- p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.sheetId=config.sheetId;p.syncedAt=r.at;await db.put('products',p);
+ p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.sheetId=config.sheetId;p.syncedAt=r.at;await db.put('products',p);
 }
 export async function itemHistory(code){return rpc('itemHistory',{code});}
 export async function stock(code){return rpc('stock',{code});}
@@ -59,9 +59,9 @@ export async function validateItems(codes){
  return rpc('validateItems',{codes});
 }
 export async function selectRevision(p,revisionId){assertSheet(p);const r=await rpc('selectRevision',{productId:p.id,revisionId});const history=await itemHistory(p.code);applyRevision(p,r.revision,history);p.syncedAt=r.at;await db.put('products',p);return p;}
-export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
+export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
 export async function loadProducts(snapshot){
- const data=snapshot||await rpc('snapshot');const completed=new Set(data.imports.map(r=>r[0])),rows=data.products.filter(r=>completed.has(r[4])),revisions=data.revisions,selections=data.selections;
+ const data=snapshot||await rpc('snapshot');if(!['imports','products','revisions','selections'].every(k=>Array.isArray(data?.[k])))throw Error('ข้อมูลจากชีตไม่ครบ กรุณารีเฟรชอีกครั้ง');const completed=new Set(data.imports.map(r=>r[0])),rows=data.products.filter(r=>completed.has(r[4])),revisions=data.revisions,selections=data.selections;
  const key=v=>String(v||'').normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase();
  return rows.map(r=>{const ids=new Set(rows.filter(x=>key(x[1])===key(r[1])).map(x=>x[0])),history=revisions.filter(x=>ids.has(x[1])),selection=selections.filter(x=>x[0]===r[0]).at(-1),rev=selection?history.find(x=>x[0]===selection[1]):history.filter(x=>x[1]===r[0]).at(-1);const p={id:r[0],code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7]};applyRevision(p,rev,history);p.syncedAt=selection?.[2]||p.syncedAt;p.importSynced=true;return p;});
 }

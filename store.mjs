@@ -9,3 +9,12 @@ export async function commitImport(batch,products){const db=await ready;return n
 export async function deleteBatch(batchId){
  const connection=await ready;return new Promise((resolve,reject)=>{const tx=connection.transaction(['imports','products','assets'],'readwrite'),store=tx.objectStore('products'),read=store.getAll();read.onsuccess=()=>{const rows=read.result,keep=new Set(rows.filter(p=>p.importId!==batchId).flatMap(p=>Object.values(p.photos||{}).flat().map(ph=>ph.id)));for(const p of rows.filter(p=>p.importId===batchId)){for(const ph of Object.values(p.photos||{}).flat())if(!keep.has(ph.id))tx.objectStore('assets').delete(ph.id);store.delete(p.id);}tx.objectStore('imports').delete(batchId);};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
 }
+
+// Read and merge in one transaction so a draft edited during the network request wins.
+export async function mergeCloudProducts(rows,merge,preserveId){
+ const connection=await ready;return new Promise((resolve,reject)=>{
+  const tx=connection.transaction('products','readwrite'),store=tx.objectStore('products');let updated=0;
+  for(const remote of rows){const request=store.get(remote.id);request.onsuccess=()=>{try{const local=request.result;if(local&&local.id===preserveId)return;const result=merge(local,remote);if(JSON.stringify(local)!==JSON.stringify(result))updated++;store.put(result);}catch(e){reject(e);tx.abort();}};}
+  tx.oncomplete=()=>resolve(updated);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('บันทึกข้อมูลที่รีเฟรชไม่สำเร็จ'));
+ });
+}

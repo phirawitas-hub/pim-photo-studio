@@ -44,3 +44,6 @@ export function csvRows(products,batches=[],workspace={},sources=new Map()){
  const headers=[...new Set(records.flatMap(r=>Object.keys(r)))];return [headers,...records.map(r=>headers.map(h=>r[h]??''))];
 }
 export function encodeCSV(rows){const cell=v=>{let s=typeof v==='object'&&v!==null?JSON.stringify(v):String(v??'');if(/^[\s]*[=+@-]|^[\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};return '\ufeff'+rows.map(r=>r.map(cell).join(',')).join('\r\n');}
+
+export function newestImports(imports){return [...imports].sort((a,b)=>(Date.parse(b.createdAt)||0)-(Date.parse(a.createdAt)||0)||String(a.id).localeCompare(String(b.id)));}
+export function productsByImportDate(products,imports){const order=new Map(newestImports(imports).map((b,i)=>[b.id,i]));return [...products].sort((a,b)=>(order.get(a.importId)??Infinity)-(order.get(b.importId)??Infinity));}

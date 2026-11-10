@@ -155,3 +155,7 @@ dialog:has(.report-wizard) .modal-head{position:sticky;top:0;z-index:3;backgroun
 .sync-status b{font-weight:600}.sync-status span{opacity:.8}.sync-status.sync-error{border-color:#ef927e;background:color-mix(in srgb,#ff5630 8%,transparent)}
 .filter-summary{margin:0;padding:0 24px 16px;font-size:12px;line-height:1.65;opacity:.8}.sync-conflict{display:grid;gap:8px;margin-top:8px;color:#bf6800;font-size:12px}.sync-conflict button{white-space:normal}
 @media(max-width:600px){.sync-status{margin:12px 16px}.filter-summary{padding:0 16px 12px}}
+
+/* Readable warehouse locations and per-item report action. */
+#table-area .product-locations{font-size:15px;font-weight:650;color:var(--ink);line-height:1.8}#table-area .product-locations .stock-location{font-size:inherit;color:inherit}#table-area .product-row-actions{flex-wrap:wrap}#table-area .row-pdf{color:var(--teal-dark)}
+@media(max-width:600px){#table-area .product-row-actions button:last-child{grid-column:1/-1}#table-area .product-locations{font-size:16px}}

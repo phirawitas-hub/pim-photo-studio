@@ -159,3 +159,5 @@ dialog:has(.report-wizard) .modal-head{position:sticky;top:0;z-index:3;backgroun
 /* Readable warehouse locations and per-item report action. */
 #table-area .product-locations{font-size:15px;font-weight:650;color:var(--ink);line-height:1.8}#table-area .product-locations .stock-location{font-size:inherit;color:inherit}#table-area .product-row-actions{flex-wrap:wrap}#table-area .row-pdf{color:var(--teal-dark)}
 @media(max-width:600px){#table-area .product-row-actions button:last-child{grid-column:1/-1}#table-area .product-locations{font-size:16px}}
+
+@media(min-width:1367px){#table-area .product-table td:last-child{min-width:360px}#table-area .product-row-actions{flex-wrap:nowrap}}

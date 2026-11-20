@@ -308,8 +308,86 @@ async function parseImport(file){
 }
 function renderMapping(){
  const state=importState;
- openModal(modalHeader('ตรวจสอบข้อมูลก่อนนำเข้า')+`<div class="modal-body"><div class="file-summary">${icon('file')}<div><b>${esc(state.file.name)}</b><small>${size(state.file.size)} · ${state.workbook.sheets.length} แท็บ · เก็บข้อมูลต้นฉบับทุกแท็บ</small></div></div><div id="import-code-check" class="import-code-check" aria-live="polite"></div><div class="actions import-check-actions"><button id="recheck-import-codes" type="button">ตรวจ Item code อีกครั้ง</button><button id="replace-import-file" type="button">เลือกไฟล์ใหม่</button></div><div id="mapping-preview"></div><p class="help">รายการจะแตกงานถ่ายแยกตาม บริษัท · Location · Inventory Status จากสต็อกล่าสุดอัตโนมัติ (ติ๊กเลือก/เอาออกเฉพาะแถวได้ก่อนนำเข้า)</p></div><div class="modal-footer"><small id="import-summary"></small><button id="confirm-import" class="primary">${icon('import')}นำเข้ารายการ</button></div>`);
+ openModal(modalHeader('ตรวจสอบข้อมูลก่อนนำเข้า')+`<div class="modal-body import-review">
+  <div class="file-summary">${icon('file')}<div><b>${esc(state.file.name)}</b><small>${size(state.file.size)} · ${state.workbook.sheets.length} แท็บ</small></div><button id="replace-import-file" type="button">เปลี่ยนไฟล์</button></div>
+  <div class="import-validation"><div id="import-code-check" class="import-code-check" aria-live="polite"></div><button id="recheck-import-codes" type="button">ตรวจรหัสอีกครั้ง</button></div>
+  <div id="mapping-preview"></div></div>
+  <div class="modal-footer"><small id="import-summary" role="status"></small><button id="confirm-import" class="primary">${icon('import')}นำเข้ารายการ</button></div>`);
  $('#confirm-import').onclick=()=>run(commitImport);$('#recheck-import-codes').onclick=()=>{state.checkSignature='';state.excludedSlots=new Set();mappingPreview();};$('#replace-import-file').onclick=openImport;mappingPreview();
+}
+function renderImportJobs(jobs,excluded){
+ const groups=new Map(),statuses=new Map();
+ for(const job of jobs){
+  const key=itemCodeKey(job.code);
+  if(!groups.has(key))groups.set(key,[]);
+  groups.get(key).push(job);
+  const status=normalizeInventoryStatus(job.stockStatus);
+  if(status)statuses.set(status,(statuses.get(status)||0)+1);
+ }
+ const preview=$('#mapping-preview');
+ function jobRow(job){
+  const location=[job.stockCompany,job.stockLocation].filter(Boolean).join(' · ')||'ยังไม่มี Location';
+  return `<label class="import-job">
+   <input type="checkbox" data-slot-key="${esc(job.stockKey)}" aria-label="${esc([job.code,location,job.stockStatus].filter(Boolean).join(' · '))}" ${excluded.has(job.stockKey)?'':'checked'}>
+   <span class="job-location">${esc(location)}</span>
+   <span class="job-status">${stockStatusBadge(job.stockStatus)||'—'}</span>
+   <span class="job-qty"><span>Qty</span> ${esc(job.stockQty||'—')}</span>
+  </label>`;
+ }
+ preview.innerHTML=`<div class="job-toolbar"><label class="job-master"><input id="import-select-all" type="checkbox">เลือกทั้งหมด</label>
+  <label class="job-presets">เลือกตามสถานะ<select id="import-pick-status"><option value="">เลือกสถานะ…</option>${[...statuses].map(([s,n])=>`<option value="${esc(s)}">เฉพาะ ${esc(s)} (${n})</option>`).join('')}</select></label>
+  <button type="button" id="import-pick-none">ล้างการเลือก</button></div>
+  ${[...groups.values()].map(group=>{
+   const first=group[0];
+   return `<section class="import-item-group"><div class="job-heading">
+    <div class="job-product"><strong class="job-code">${esc(first.code)}</strong><span>${esc(first.name)}</span></div>
+    <small>แถว ${esc(first.sourceRow)} · <span data-group-count></span></small></div>
+    ${group.map(jobRow).join('')}</section>`;
+  }).join('')}`;
+ const master=preview.querySelector('#import-select-all');
+ const preset=preview.querySelector('#import-pick-status');
+ const clear=preview.querySelector('#import-pick-none');
+ const sections=[...preview.querySelectorAll('.import-item-group')].map(section=>({
+  count:section.querySelector('[data-group-count]'),boxes:[...section.querySelectorAll('[data-slot-key]')]
+ }));
+ function updateCounts(){
+  let selected=0,items=0;
+  for(const {count,boxes} of sections){
+   const n=boxes.reduce((sum,box)=>sum+Number(box.checked),0);
+   count.textContent='เลือก '+n+'/'+boxes.length;
+   selected+=n;
+   if(n)items++;
+  }
+  master.checked=selected===jobs.length;
+  master.indeterminate=selected>0&&selected<jobs.length;
+  clear.disabled=!selected;
+  $('#import-summary').textContent='เลือก '+selected+' / '+jobs.length+' งานถ่าย · '+items+' / '+groups.size+' Item';
+  const confirm=$('#confirm-import');
+  confirm.disabled=!selected;
+  confirm.innerHTML=icon('import')+'นำเข้า '+selected+' งานถ่าย';
+ }
+ function selectWhere(matches){
+  for(const {boxes} of sections)for(const box of boxes){
+   box.checked=matches(box.dataset.slotKey);
+   if(box.checked)excluded.delete(box.dataset.slotKey);else excluded.add(box.dataset.slotKey);
+  }
+  updateCounts();
+ }
+ master.onchange=()=>selectWhere(()=>master.checked);
+ clear.onclick=()=>selectWhere(()=>false);
+ preset.onchange=()=>{
+  if(!preset.value)return;
+  const keys=new Set(jobs.filter(job=>normalizeInventoryStatus(job.stockStatus)===preset.value).map(job=>job.stockKey));
+  selectWhere(key=>keys.has(key));
+  preset.value='';
+ };
+ preview.onchange=event=>{
+  const box=event.target;
+  if(!box.matches('[data-slot-key]'))return;
+  if(box.checked)excluded.delete(box.dataset.slotKey);else excluded.add(box.dataset.slotKey);
+  updateCounts();
+ };
+ updateCounts();
 }
 function mappingPreview(){
  const state=importState;if(!state)return;
@@ -320,41 +398,16 @@ function mappingPreview(){
  if(!mapped){state.checkSignature=signature;state.codeCheck=null;state.checkError='';state.checking=false;state.checkRequest=(state.checkRequest||0)+1;}
  if(mapped&&state.checkSignature!==signature){state.checkSignature=signature;state.codeCheck=null;state.checkError='';state.checking=true;state.excludedSlots=new Set();checkImportCodes(state,signature);}
  const review=reviewImportProducts(result.products,state.codeCheck);
- const selectedJobs=review.expanded.filter(p=>!state.excludedSlots.has(p.stockKey));
  const box=$('#import-code-check');box.className='import-code-check '+(state.checking?'checking':review.valid?'passed':'failed');
- box.innerHTML=state.checking?'<b>กำลังตรวจ Item code และ Location…</b><p>ตรวจจากชีตสต็อกล่าสุดและแตกงานตามสถานะก่อนนำเข้า</p>':!mapped?'<b>ไม่พบรายการสินค้า กรุณาตรวจไฟล์แล้วเลือกใหม่</b>':!review.readable?'<b>ยังตรวจสอบ Item code ไม่สำเร็จ</b><p>'+esc(state.checkError||review.warnings.join(' · ')||review.message)+'</p>':review.missing.length?'<b>กรุณาตรวจสอบ Item code · ไม่พบ '+review.missing.length+' รายการ</b><p>แก้รหัสในไฟล์ให้ตรงกับรหัสเต็มในสต็อก รวมตัวอักษรหรือรหัสสีท้าย Item code แล้วเลือกไฟล์ใหม่</p>':'<b>ตรวจพบ Item code ครบ '+result.products.length+' รายการ · แตกเป็น '+selectedJobs.length+' / '+review.expanded.length+' งานถ่าย</b><p>'+(review.noLocation.length?'พบรหัสแต่ยังไม่มี Location '+review.noLocation.length+' รายการ · ตรวจข้อมูลตำแหน่งในชีตสต็อก':'พร้อมนำเข้า · แยกตาม Company · Location · Inventory Status จากสต็อกล่าสุด')+'</p>';
+ box.innerHTML=state.checking?'<b>กำลังตรวจ Item code และ Location…</b><p>ตรวจจากชีตสต็อกล่าสุดและแตกงานตามสถานะก่อนนำเข้า</p>':!mapped?'<b>ไม่พบรายการสินค้า กรุณาตรวจไฟล์แล้วเลือกใหม่</b>':!review.readable?'<b>ยังตรวจสอบ Item code ไม่สำเร็จ</b><p>'+esc(state.checkError||review.warnings.join(' · ')||review.message)+'</p>':review.missing.length?'<b>กรุณาตรวจสอบ Item code · ไม่พบ '+review.missing.length+' รายการ</b><p>แก้รหัสในไฟล์ให้ตรงกับรหัสเต็มในสต็อก รวมตัวอักษรหรือรหัสสีท้าย Item code แล้วเลือกไฟล์ใหม่</p>':'<b>ตรวจพบ Item code ครบ '+result.products.length+' รายการ · '+review.expanded.length+' งานถ่าย</b><p>'+(review.noLocation.length?'พบรหัสแต่ยังไม่มี Location '+review.noLocation.length+' รายการ · ตรวจข้อมูลตำแหน่งในชีตสต็อก':'พร้อมนำเข้า · แยกตาม Company · Location · Inventory Status จากสต็อกล่าสุด')+'</p>';
  if(review.valid&&review.expanded.length){
-  const statusCounts=new Map();
-  const byCodeCounts=new Map();
-  for(const p of review.expanded){
-   const st=normalizeInventoryStatus(p.stockStatus);
-   if(st)statusCounts.set(st,(statusCounts.get(st)||0)+1);
-   const ck=itemCodeKey(p.code),c=byCodeCounts.get(ck)||{total:0,selected:0};
-   c.total++;if(!state.excludedSlots.has(p.stockKey))c.selected++;
-   byCodeCounts.set(ck,c);
-  }
-  const skippedItems=[...byCodeCounts.values()].filter(c=>c.selected===0).length;
-  const toolbar='<div class="actions import-slot-toolbar"><button type="button" class="small" id="import-pick-all">เลือกทั้งหมด ('+review.expanded.length+')</button><button type="button" class="small" id="import-pick-none">ล้างทั้งหมด</button>'+[...statusCounts].map(([st,n])=>'<button type="button" class="small" data-pick-status="'+esc(st)+'">เฉพาะ '+esc(st)+' ('+n+')</button>').join('')+'</div>';
-  let prevCode='';
-  $('#mapping-preview').innerHTML=toolbar+'<div class="preview-table import-stock-preview"><table><thead><tr><th style="width:36px"><input type="checkbox" id="import-select-all" aria-label="เลือกทุกงาน" '+(selectedJobs.length===review.expanded.length?'checked':'')+'></th><th>แถว</th><th>ITEM CODE</th><th>ชื่อสินค้า</th><th>บริษัท · Location</th><th>Inventory Status</th><th>Qty</th></tr></thead><tbody>'+review.expanded.map(p=>{
-   const checked=!state.excludedSlots.has(p.stockKey),ck=itemCodeKey(p.code),isGroupStart=ck!==prevCode;prevCode=ck;
-   const cnt=byCodeCounts.get(ck),groupTag=isGroupStart&&cnt.total>1?'<span class="import-item-count '+(cnt.selected?'':'empty')+'">'+(cnt.selected?'เลือก '+cnt.selected+'/'+cnt.total:'ข้าม')+'</span>':'';
-   return '<tr class="'+(checked?'':'import-slot-excluded')+(isGroupStart?' import-group-start':'')+'"><td><input type="checkbox" data-slot-key="'+esc(p.stockKey)+'" '+(checked?'checked':'')+' aria-label="เลือก '+esc(p.code+' '+stockLabel(p))+'"></td><td>'+p.sourceRow+'</td><td class="code">'+esc(p.code)+groupTag+'</td><td>'+esc(p.name)+'</td><td>'+(p.stockCompany||p.stockLocation?'<span class="stock-location">'+esc([p.stockCompany,p.stockLocation].filter(Boolean).join(' · '))+'</span>':'<span class="import-location-empty">ยังไม่มี Location</span>')+'</td><td>'+(stockStatusBadge(p.stockStatus)||'—')+'</td><td>'+esc(p.stockQty!==''&&p.stockQty!==undefined?p.stockQty:'—')+'</td></tr>';
-  }).join('')+'</tbody></table></div>';
-  const allBox=$('#import-select-all');
-  if(allBox){allBox.indeterminate=selectedJobs.length>0&&selectedJobs.length<review.expanded.length;allBox.onchange=e=>{if(e.target.checked)state.excludedSlots.clear();else for(const p of review.expanded)state.excludedSlots.add(p.stockKey);mappingPreview();};}
-  $('#import-pick-all').onclick=()=>{state.excludedSlots.clear();mappingPreview();};
-  $('#import-pick-none').onclick=()=>{for(const p of review.expanded)state.excludedSlots.add(p.stockKey);mappingPreview();};
-  modalContent.querySelectorAll('[data-pick-status]').forEach(b=>b.onclick=()=>{const target=b.dataset.pickStatus;state.excludedSlots.clear();for(const p of review.expanded)if(normalizeInventoryStatus(p.stockStatus)!==target)state.excludedSlots.add(p.stockKey);mappingPreview();});
-  modalContent.querySelectorAll('[data-slot-key]').forEach(cb=>cb.onchange=e=>{if(e.target.checked)state.excludedSlots.delete(cb.dataset.slotKey);else state.excludedSlots.add(cb.dataset.slotKey);mappingPreview();});
-  $('#import-summary').textContent='เลือก '+selectedJobs.length+' / '+review.expanded.length+' งานถ่าย (จาก '+result.products.length+' Item'+(skippedItems?' · ข้าม '+skippedItems+' Item':'')+')';
-  $('#confirm-import').innerHTML=icon('import')+'นำเข้า '+selectedJobs.length+' งานถ่าย';
+  renderImportJobs(review.expanded,state.excludedSlots);
  }else{
   $('#mapping-preview').innerHTML='<div class="preview-table import-stock-preview"><table><thead><tr><th>แถว</th><th>ITEM CODE</th><th>ชื่อสินค้า</th><th>ผลตรวจ / Location</th></tr></thead><tbody>'+review.items.map(p=>'<tr class="'+(p.status==='missing'?'import-code-missing':'')+'"><td>'+p.sourceRow+'</td><td class="code">'+esc(p.code)+'</td><td>'+esc(p.name)+'</td><td>'+(state.checking?'กำลังตรวจสอบ…':p.status==='missing'?'<strong class="import-code-error">กรุณาตรวจสอบ Item code</strong><small>ไม่พบรหัสนี้ในสต็อก</small>':p.status==='found'?(p.locations?.length?p.locations.map(value=>'<span class="stock-location">'+esc(value)+'</span>').join(''):'<span class="import-location-empty">พบ Item code · ยังไม่มี Location</span>'):'รอตรวจสอบ')+'</td></tr>').join('')+'</tbody></table></div>';
   $('#import-summary').textContent='รายการ '+result.products.length+' · รหัสซ้ำในไฟล์ '+result.duplicates+' · ข้ามแถวไม่ครบ '+result.skipped;
   $('#confirm-import').innerHTML=icon('import')+'นำเข้ารายการ';
  }
- $('#confirm-import').disabled=!mapped||state.checking||!review.valid||(review.expanded.length>0&&!selectedJobs.length);
+ if(!mapped||state.checking||!review.valid)$('#confirm-import').disabled=true;
  $('#recheck-import-codes').disabled=!mapped||state.checking;
 }
 async function checkImportCodes(state,signature){

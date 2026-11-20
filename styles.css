@@ -221,3 +221,72 @@ dialog:has(.report-wizard) .modal-head{position:sticky;top:0;z-index:3;backgroun
 .location-choice>div{min-width:0;flex:1}
 .location-choice-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
 .location-choice small{display:block;color:var(--muted);font-size:12px;line-height:1.5}
+
+/* Import review: keep each code with its stock locations in a single scrolling list. */
+dialog:has(.import-review) {
+  width: min(1000px, calc(100% - 24px));
+  max-width: none;
+  max-height: min(92vh, 1000px);
+  max-height: min(92dvh, 1000px);
+  overflow: hidden;
+}
+#modal-content:has(.import-review) {
+  display: flex;
+  flex-direction: column;
+  max-height: inherit;
+}
+#modal-content:has(.import-review) > :is(.modal-head, .modal-footer) { flex: none; }
+.import-review { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.import-review .file-summary { margin: 0; gap: 12px; }
+.import-review .file-summary div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.import-review .file-summary > .icon { flex-shrink: 0; color: var(--teal-dark); }
+.import-review :is(.file-summary, .import-validation, .job-toolbar) button { min-height: 40px; padding: 7px 12px; font-size: 13px; }
+.import-validation { display: flex; align-items: center; gap: 12px; margin: 12px 0 16px; }
+.import-validation .import-code-check { flex: 1; margin: 0; padding: 6px 12px; border-width: 0 0 0 3px; border-radius: 0; background: transparent; }
+.import-validation .import-code-check b { font-size: 15px; }
+.import-validation .import-code-check p { margin: 3px 0 0; }
+.job-toolbar, .job-master, .job-presets { display: flex; align-items: center; gap: 10px; }
+.job-toolbar { flex-wrap: wrap; padding: 8px 0 12px; }
+.job-master { margin-right: auto; min-height: 44px; font-weight: 700; cursor: pointer; }
+.job-presets { font-size: 13px; color: var(--muted); }
+.job-presets select { min-width: 0; max-width: 100%; min-height: 42px; font-size: 14px; }
+.import-review input[type=checkbox] { width: 20px; height: 20px; min-height: 20px; margin: 0; accent-color: var(--teal); cursor: pointer; }
+.import-item-group { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.import-item-group:last-child { margin-bottom: 0; }
+.job-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 10px 16px; background: var(--fill); }
+.job-product { flex: 1 1 18rem; min-width: 0; }
+.job-product > span { display: block; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.job-heading small { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.job-code, .job-location { display: block; max-width: 100%; min-width: 0; white-space: nowrap; overflow-x: auto; word-break: normal; overflow-wrap: normal; font-variant-numeric: tabular-nums; }
+.job-code { font-size: 16px; line-height: 1.5; }
+.job-location { font-weight: 600; font-size: 15px; }
+.import-job {
+  display: grid;
+  grid-template-columns: 20px minmax(0,1fr) 110px 72px;
+  align-items: center; gap: 6px 14px; padding: 10px 16px; min-height: 46px;
+  border-top: 1px solid var(--line); cursor: pointer;
+}
+.import-job:has(input:checked) { background: color-mix(in srgb, var(--teal) 8%, var(--surface)); }
+.import-job:focus-within { outline: 2px solid var(--teal); outline-offset: -2px; }
+.job-status { min-width: 0; }
+.job-status .inv-status { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.job-qty { font-variant-numeric: tabular-nums; text-align: right; font-size: 13px; }
+.job-qty span { color: var(--muted); }
+.import-review .preview-table { max-height: none; overflow-x: auto; }
+.import-review .preview-table :is(.code, .stock-location) { white-space: nowrap; word-break: normal; overflow-wrap: normal; }
+@media (max-width: 600px) {
+  dialog:has(.import-review) { width: calc(100% - 12px); max-height: 96vh; max-height: 96dvh; }
+  .import-review { padding: 14px; }
+  .import-validation { flex-wrap: wrap; }
+  .import-validation .import-code-check { flex-basis: 100%; }
+  .job-toolbar { display: grid; grid-template-columns: 1fr auto; }
+  .job-presets { grid-column: 1 / -1; grid-row: 2; }
+  .job-presets select { flex: 1; }
+  .job-heading { display: block; padding: 10px 12px; }
+  .job-heading small { display: block; margin-top: 3px; }
+  .import-job { grid-template-columns: 20px minmax(0,1fr) auto; gap: 3px 10px; padding: 9px 12px; }
+  .import-job input { grid-row: 1 / 3; }
+  .job-location { grid-column: 2 / -1; }
+  .job-status { grid-column: 2; }
+  #modal-content:has(.import-review) .modal-footer { gap: 8px; flex-wrap: wrap; padding: 10px 14px; }
+}

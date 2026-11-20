@@ -5,7 +5,7 @@ export function viewerPhotos(product){
 export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl,thumbnailUrl=photoUrl}){
  const all=viewerPhotos(product);let items=all,index=0,sequence=0,closed=false,thumbnailGeneration=0;
  if(!all.length)return;
- openModal(modalHeader('ดูรูป · '+product.code)+
+ openModal(modalHeader('ดูรูป · '+esc([product.code,product.stockLocation,product.stockStatus].filter(Boolean).join(' · ')))+
  '<div class="photo-viewer"><div class="viewer-info"><div><strong>'+esc(product.name)+'</strong><p>Revision '+esc(product.revisionNumber||'ฉบับร่าง')+(product.dirty?' · มีฉบับร่างที่ยังไม่บันทึก':'')+' · โหมดดูรูป</p></div><label>มุมภาพ<select id="viewer-angle"><option value="">ทุกมุม · '+all.length+' รูป</option>'+ANGLES.filter(a=>all.some(p=>p.angle===a.id)).map(a=>'<option value="'+a.id+'">'+esc(a.name)+'</option>').join('')+'</select></label></div>'+
  '<div class="viewer-stage"><button id="viewer-prev" class="viewer-arrow" aria-label="ภาพก่อนหน้า">‹</button><div class="viewer-canvas"><img id="viewer-image" alt="" hidden><div id="viewer-message" role="status" aria-live="polite">กำลังโหลดภาพ…</div><button id="viewer-retry" hidden>ลองโหลดภาพอีกครั้ง</button></div><button id="viewer-next" class="viewer-arrow" aria-label="ภาพถัดไป">›</button></div>'+
  '<div class="viewer-caption"><div><strong id="viewer-label"></strong><small id="viewer-filename"></small></div><span id="viewer-count"></span></div><small id="viewer-load-progress" role="status"></small><div id="viewer-thumbnails" class="viewer-thumbnails" aria-label="เลือกรูป"></div><p class="viewer-help">ใช้ปุ่ม ← → เพื่อเปลี่ยนรูป · Esc เพื่อปิด · ภาพที่เคยเปิดดูจะเก็บไว้ในเครื่องเพื่อเปิดครั้งถัดไปได้เร็วขึ้น</p></div>');

@@ -4,7 +4,7 @@ const PIM_SCHEMA = {
   PIM_Deletions:['Import ID','Deleted At','File Name','Plan JSON','Status'],
   PIM_Branding:['Key','Value'],
   PIM_Options:['Kind','Value','Active'],
-  PIM_Products:['id','Item Code','Product Name','Purpose','Import ID','Source Sheet','Source Row','Created At'],
+  PIM_Products:['id','Item Code','Product Name','Purpose','Import ID','Source Sheet','Source Row','Created At','Stock Company','Stock Location','Inventory Status','Stock Qty'],
   PIM_Revisions:['id','Product ID','Updated At','Complete','Metadata JSON','Photos JSON'],
   PIM_Imports:['id','File Name','Created At','Drive File ID','Source Sheets','Products'],
   PIM_Source:['id','Part','Source Metadata JSON'],
@@ -12,6 +12,20 @@ const PIM_SCHEMA = {
   PIM_Files:['key','Drive File ID','Kind','Product ID','Angle','Size','MIME']
 };
 const PIM_ANGLES = ['top','under','left','right','inner','outer','delivery','components'];
+const PIM_STATUS_MAP = {GOOD:'Good',DAMAGE:'Damage',INCOMPLETE:'Incomplete',DISPOSAL:'Disposal',QC:'QC',HOLD:'Hold',BORROW:'Borrow'};
+function normStatus_(v){
+  const s=String(v||'').normalize('NFKC').trim().replace(/\s+/g,' ');
+  return s?(PIM_STATUS_MAP[s.toUpperCase()]||s):'';
+}
+function stockSlotKey_(company,location,status){
+  return [String(company||'').trim().toUpperCase(),itemKey_(location),itemKey_(status)].join('|');
+}
+function productScopeKey_(product){
+  return itemKey_(product?.[1])+'|'+stockSlotKey_(product?.[8],product?.[9],product?.[10]);
+}
+function uuid_(){
+  return typeof Utilities!=='undefined'&&Utilities.getUuid?Utilities.getUuid():'pim-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);
+}
 function doGet(e) {
   if(e && e.parameter.bridge==='1')return bridge_(e.parameter.channel);
 
@@ -26,7 +40,7 @@ function pimCall(request) {
   if(!request || typeof request!=='object' || Array.isArray(request))throw Error('คำขอไม่ถูกต้อง');
   if(request.sheetId && request.sheetId!==sheetId)throw Error('แอปนี้ใช้งานได้เฉพาะชีต PIM ที่กำหนดไว้');
   request={...request,sheetId};
-  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','validateItems','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport'];
+  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','validateItems','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport','splitPendingStock'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
   const readOnly=['hello','read','stock','validateItems','itemHistory','photo','snapshot','workspace'].includes(request.action);
   const lock=readOnly?null:LockService.getScriptLock();
@@ -40,13 +54,14 @@ function pimCall(request) {
     if (request.action==='snapshot') return Object.assign(workspace_(ss),{products:table_(ss,'PIM_Products'),revisions:table_(ss,'PIM_Revisions'),selections:table_(ss,'PIM_Selections')});
     if (request.action==='stock') return stock_(ss,p.code);
     if (request.action==='validateItems') return validateItems_(ss,p.codes);
-    if (request.action==='itemHistory') return itemHistory_(ss,p.code);
+    if (request.action==='itemHistory') return itemHistory_(ss,p);
     if (request.action==='photo') return photo_(ss,p.fileId);
     if(request.action==='deletePreview')return deletePreview_(ss,p);
     schema_(ss);
     if(request.action!=='deleteImport')assertActiveImport_(ss,request.action,p);
     switch(request.action) {
       case 'deleteImport':return deleteImport_(ss,p);
+      case 'splitPendingStock': return splitPendingStock_(ss);
       case 'branding': return saveBranding_(ss,p);
       case 'option': return option_(ss,p);
       case 'selectRevision': return selectRevision_(ss,p);
@@ -72,14 +87,27 @@ function id_(value) {
   if (typeof value!=='string'||!/^[-\w]{1,120}$/.test(value)) throw Error('รหัสไม่ถูกต้อง');
   return value;
 }
-function header_(sheet,name) {
+function header_(sheet,name,allowMigrate) {
   const expected=PIM_SCHEMA[name];
   if (!expected) throw Error('ไม่รองรับตารางนี้');
-  if (sheet.getLastRow() && sheet.getRange(1,1,1,expected.length).getDisplayValues()[0].join('|')!==expected.join('|')) throw Error('โครงสร้างแท็บ '+name+' ต่างจากแอป กรุณาใช้ชีตใหม่');
+  if (!sheet.getLastRow()) return;
+  const lastCol=typeof sheet.getLastColumn==='function'?Math.max(1,sheet.getLastColumn()):expected.length;
+  const current=sheet.getRange(1,1,1,Math.min(lastCol,expected.length)).getDisplayValues()[0];
+  while(current.length&&!current[current.length-1])current.pop();
+  if (current.join('|')===expected.join('|')) return;
+  if (name==='PIM_Products'&&current.join('|')===expected.slice(0,8).join('|')) {
+    if (allowMigrate) {
+      grow_(sheet,Math.max(sheet.getLastRow(),1),expected.length);
+      sheet.getRange(1,9,1,expected.length-8).setValues([expected.slice(8)]);
+      delete PIM_TABLE_CACHE[name];
+    }
+    return;
+  }
+  throw Error('โครงสร้างแท็บ '+name+' ต่างจากแอป กรุณาใช้ชีตใหม่');
 }
 function schema_(ss) {
   Object.keys(PIM_SCHEMA).forEach(name=>{
-    const s=ss.getSheetByName(name)||ss.insertSheet(name);header_(s,name);
+    const s=ss.getSheetByName(name)||ss.insertSheet(name);header_(s,name,true);
     if (!s.getLastRow()) {s.getRange(1,1,1,PIM_SCHEMA[name].length).setValues([PIM_SCHEMA[name]]);s.setFrozenRows(1);}
   });
 }
@@ -87,8 +115,11 @@ let PIM_TABLE_CACHE={};
 function table_(ss,name) {
   if(PIM_TABLE_CACHE[name])return PIM_TABLE_CACHE[name];
   if (!PIM_SCHEMA[name]) throw Error('ไม่รองรับตารางนี้');
-  const s=ss.getSheetByName(name); if (!s) return [];header_(s,name);
-  return PIM_TABLE_CACHE[name]=s.getLastRow()<2?[]:s.getRange(2,1,s.getLastRow()-1,PIM_SCHEMA[name].length).getDisplayValues().filter(r=>r[0]);
+  const s=ss.getSheetByName(name); if (!s) return [];header_(s,name,false);
+  const expectedLen=PIM_SCHEMA[name].length;
+  const cols=typeof s.getLastColumn==='function'?Math.min(Math.max(1,s.getLastColumn()),expectedLen):expectedLen;
+  const rows=s.getLastRow()<2?[]:s.getRange(2,1,s.getLastRow()-1,cols).getDisplayValues().filter(r=>r[0]);
+  return PIM_TABLE_CACHE[name]=cols===expectedLen?rows:rows.map(r=>[...r,...Array(expectedLen-cols).fill('')]);
 }
 function raw_(v) {
   // Apostrophe prevents SpreadsheetApp from evaluating imported Excel formulas.
@@ -135,7 +166,9 @@ function upload_(ss,p) {
     const valid=p.mime==='image/jpeg'?b[0]===255&&b[1]===216:p.mime==='image/png'?b.slice(0,8).join(',')==='137,80,78,71,13,10,26,10':String.fromCharCode.apply(null,b.slice(0,4))==='RIFF'&&String.fromCharCode.apply(null,b.slice(8,12))==='WEBP';
     if(!valid)throw Error('เนื้อหาไฟล์ไม่ตรงกับชนิดรูป');
     const product=table_(ss,'PIM_Products').find(r=>r[0]===p.productId);if(!product)throw Error('ไม่พบสินค้าในชีต');
-    parent=folder_(folder_(parent,product[1]+' - '+p.productId),p.angle);
+    const scopeParts=[product[1],product[8],product[9],product[10]].map(v=>String(v||'').trim()).filter(Boolean);
+    const folderName=(scopeParts.join(' - ')+' - '+p.productId).replace(/[\/\\\x00-\x1f]/g,'_').slice(0,180);
+    parent=folder_(folder_(parent,folderName),p.angle);
   } else {
     if(!/\.(xlsx|xls|csv)$/i.test(p.name||''))throw Error('รองรับไฟล์ Excel/CSV เท่านั้น');
     parent=folder_(parent,'Imports');
@@ -151,17 +184,24 @@ function sourceRows_(ss,p) { id_(p.batchId); return true; }
 function products_(ss,rows) {
   if(!Array.isArray(rows)||rows.length>250)throw Error('จำนวนสินค้าเกินกำหนด');
   const existing=new Set(table_(ss,'PIM_Products').map(r=>r[0])),added=[];
-  for(const r of rows) {if(!Array.isArray(r)||r.length!==8)throw Error('ข้อมูลสินค้าไม่ถูกต้อง');id_(r[0]);id_(r[4]);if(!existing.has(r[0])){added.push(r);existing.add(r[0]);}}
+  for(const r of rows) {
+    if(!Array.isArray(r)||(r.length!==8&&r.length!==12))throw Error('ข้อมูลสินค้าไม่ถูกต้อง');
+    id_(r[0]);id_(r[4]);
+    if(!existing.has(r[0])){
+      const normalized=r.length===12?[...r.slice(0,8),String(r[8]||'').trim().toUpperCase(),String(r[9]||'').trim(),normStatus_(r[10]),r[11]===undefined||r[11]===null?'':String(r[11]).trim()]:[...r,'','','',''];
+      added.push(normalized);existing.add(r[0]);
+    }
+  }
   append_(ss,'PIM_Products',added);return true;
 }
 function revision_(ss,p) {
   id_(p.id);id_(p.productId);
   const product=table_(ss,'PIM_Products').find(r=>r[0]===p.productId);
   if(!product||!table_(ss,'PIM_Imports').some(r=>r[0]===product[4]))throw Error('กรุณาบันทึกไฟล์นำเข้าให้เสร็จก่อน');
-  const rows=itemHistory_(ss,product[1]),last=rows[rows.length-1];
+  const rows=productHistory_(ss,product),last=rows[rows.length-1];
   if(last&&last[0]===p.id){selectRevision_(ss,{productId:p.productId,revisionId:last[0]});return {id:last[0],at:last[2],number:rows.length};}
   if((last?last[0]:null)!==(p.baseRevision||null))throw Error('มีเวอร์ชันใหม่ในชีต กรุณาตรวจประวัติก่อนบันทึก');
-  const files=table_(ss,'PIM_Files'),seen=new Set(),same=new Set(table_(ss,'PIM_Products').filter(r=>itemKey_(r[1])===itemKey_(product[1])).map(r=>r[0]));
+  const files=table_(ss,'PIM_Files'),seen=new Set(),scope=productScopeKey_(product),same=new Set(table_(ss,'PIM_Products').filter(r=>productScopeKey_(r)===scope).map(r=>r[0]));
   const photos=p.photos||{};
   if(Object.keys(photos).some(k=>!PIM_ANGLES.includes(k)))throw Error('มุมภาพไม่ถูกต้อง');
   for(const angle of PIM_ANGLES) {
@@ -229,7 +269,7 @@ function sourceData_(ss,product,cache){
 }
 function dataHeaders_(s,extra){
  let headers=s.getLastRow()?s.getRange(1,1,1,Math.max(1,s.getLastColumn())).getDisplayValues()[0]:[];const oldLength=headers.length;
- const required=[...DATA_BASE,...extra,'PIM Product ID','Import ID','ไฟล์นำเข้า','ลิงก์ไฟล์ต้นฉบับ','แท็บต้นฉบับ','แถวต้นฉบับ','สถานะถ่ายภาพ','จำนวนรูป','มุมบังคับครบ','อัปเดตล่าสุด','วันที่เวลาบันทึก','วันที่เวลานำเข้าระบบ','Revision','Revision ID',...Object.values(DATA_FIELDS)];
+ const required=[...DATA_BASE,...extra,'PIM Product ID','Import ID','ไฟล์นำเข้า','ลิงก์ไฟล์ต้นฉบับ','แท็บต้นฉบับ','แถวต้นฉบับ','Stock Company','Stock Location','Inventory Status','On Hand Qty','สถานะถ่ายภาพ','จำนวนรูป','มุมบังคับครบ','อัปเดตล่าสุด','วันที่เวลาบันทึก','วันที่เวลานำเข้าระบบ','Revision','Revision ID',...Object.values(DATA_FIELDS)];
  for(const group of ['Physical Product','Original Package (Inner)','Original Package (Outer)','Delivery Package'])for(const field of ['Width (cm)','Length (cm)','Height (cm)','Net Weight (kg)','Gross Weight (kg)'])required.push(group+' · '+field);
  for(const name of DATA_ANGLE_NAMES)for(let i=1;i<=5;i++)required.push(name+' '+i);
  const keys=new Set(headers.filter(Boolean).map(h=>normData_(dataKey_(h))));
@@ -251,11 +291,11 @@ function writeData_(ss,product,revision,cache){
  const selected=table_(ss,'PIM_Selections').filter(r=>r[0]===product[0]).pop();
  changes['วันที่เวลาบันทึก']=selected?.[2]||values[index[normData_('วันที่เวลาบันทึก')]]||new Date().toISOString();
  for(const [h,v] of Object.entries(original)){const col=index[normData_(dataKey_(h))];if(found<0||values[col]==='')changes[h]=v;}
- Object.assign(changes,{'PIM Product ID':product[0],'Import ID':product[4],'รหัสสินค้า':product[1],'ชื่อสินค้า':product[2],'วัตถุประสงค์':product[3],'ไฟล์นำเข้า':imported[1],'ลิงก์ไฟล์ต้นฉบับ':'https://drive.google.com/file/d/'+imported[3]+'/view','แท็บต้นฉบับ':product[5],'แถวต้นฉบับ':product[6]});
+ Object.assign(changes,{'PIM Product ID':product[0],'Import ID':product[4],'รหัสสินค้า':product[1],'ชื่อสินค้า':product[2],'วัตถุประสงค์':product[3],'ไฟล์นำเข้า':imported[1],'ลิงก์ไฟล์ต้นฉบับ':'https://drive.google.com/file/d/'+imported[3]+'/view','แท็บต้นฉบับ':product[5],'แถวต้นฉบับ':product[6],'Stock Company':product[8]||'','Stock Location':product[9]||'','Inventory Status':product[10]||'','On Hand Qty':product[11]??''});
  if(revision){
   const meta=JSON.parse(revision[4]||'{}'),photos=JSON.parse(revision[5]||'{}');let total=0,required=0;
   PIM_ANGLES.forEach((key,n)=>{const list=photos[key]||[];total+=list.length;if(n<7&&list.length)required++;for(let i=0;i<5;i++)changes[DATA_ANGLE_NAMES[n]+' '+(i+1)]=list[i]?'https://drive.google.com/file/d/'+list[i].fileId+'/view':'';});
-  Object.assign(changes,{'วัตถุประสงค์':revision[1]===product[0]?(meta.purpose??product[3]):product[3],'สถานะถ่ายภาพ':required===7?'ถ่ายครบแล้ว':total?'กำลังดำเนินการ':'รอถ่ายรูป','จำนวนรูป':total,'มุมบังคับครบ':required+'/7','อัปเดตล่าสุด':revision[2],'Revision ID':revision[0],'Revision':meta.revisionNumber||itemHistory_(ss,product[1]).findIndex(r=>r[0]===revision[0])+1});
+  Object.assign(changes,{'วัตถุประสงค์':revision[1]===product[0]?(meta.purpose??product[3]):product[3],'สถานะถ่ายภาพ':required===7?'ถ่ายครบแล้ว':total?'กำลังดำเนินการ':'รอถ่ายรูป','จำนวนรูป':total,'มุมบังคับครบ':required+'/7','อัปเดตล่าสุด':revision[2],'Revision ID':revision[0],'Revision':meta.revisionNumber||productHistory_(ss,product).findIndex(r=>r[0]===revision[0])+1});
   for(const [key,name] of Object.entries(DATA_FIELDS))changes[name]=meta.fields?.[key]??'';
   ['physical','inner','outer','delivery'].forEach((key,i)=>['width','length','height','net','gross'].forEach((f,j)=>{changes[['Physical Product','Original Package (Inner)','Original Package (Outer)','Delivery Package'][i]+' · '+['Width (cm)','Length (cm)','Height (cm)','Net Weight (kg)','Gross Weight (kg)'][j]]=meta.dimensions?.[key]?.[f]??'';}));
  }else if(found<0)Object.assign(changes,{'สถานะถ่ายภาพ':'รอถ่ายรูป','จำนวนรูป':0,'มุมบังคับครบ':'0/7'});
@@ -286,7 +326,7 @@ function syncData_(ss,p){
  const cache={},chunk=products.slice(offset,offset+50);for(const product of chunk){
   let selection=table_(ss,'PIM_Selections').filter(r=>r[0]===product[0]).pop();
   let rev=selection?revisions.find(r=>r[0]===selection[1]):map.get(product[0]);
-  if(!selection&&!rev)rev=itemHistory_(ss,product[1]).filter(r=>Object.values(JSON.parse(r[5]||'{}')).some(a=>a.length)).pop();
+  if(!selection&&!rev)rev=productHistory_(ss,product).filter(r=>Object.values(JSON.parse(r[5]||'{}')).some(a=>a.length)).pop();
   if(!selection&&rev){append_(ss,'PIM_Selections',[[product[0],rev[0],new Date().toISOString()]]);}
   writeData_(ss,product,rev,cache);
  }
@@ -294,16 +334,31 @@ function syncData_(ss,p){
 }
 
 function itemKey_(v){return String(v||'').normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase();}
-function itemHistory_(ss,code){
- const ids=new Set(table_(ss,'PIM_Products').filter(r=>itemKey_(r[1])===itemKey_(code)).map(r=>r[0]));
+function productHistory_(ss,product){
+ const scope=productScopeKey_(product);
+ const ids=new Set(table_(ss,'PIM_Products').filter(r=>productScopeKey_(r)===scope).map(r=>r[0]));
+ return table_(ss,'PIM_Revisions').filter(r=>ids.has(r[1]));
+}
+function itemHistory_(ss,query){
+ const products=table_(ss,'PIM_Products');
+ if(query&&typeof query==='object'){
+  if(query.productId){const found=products.find(r=>r[0]===query.productId);if(found)return productHistory_(ss,found);}
+  if(query.stockCompany||query.stockLocation||query.stockStatus){
+   const scope=itemKey_(query.code)+'|'+stockSlotKey_(query.stockCompany,query.stockLocation,query.stockStatus);
+   const ids=new Set(products.filter(r=>productScopeKey_(r)===scope).map(r=>r[0]));
+   return table_(ss,'PIM_Revisions').filter(r=>ids.has(r[1]));
+  }
+  query=query.code;
+ }
+ const ids=new Set(products.filter(r=>itemKey_(r[1])===itemKey_(query)).map(r=>r[0]));
  return table_(ss,'PIM_Revisions').filter(r=>ids.has(r[1]));
 }
 function selectRevision_(ss,p){
  id_(p.productId);id_(p.revisionId);
  const product=table_(ss,'PIM_Products').find(r=>r[0]===p.productId);
  if(!product||!table_(ss,'PIM_Imports').some(r=>r[0]===product[4]))throw Error('ไม่พบงานนำเข้าที่บันทึกเสร็จ');
- const revision=itemHistory_(ss,product[1]).find(r=>r[0]===p.revisionId);
- if(!revision)throw Error('Revision ไม่ตรงกับ Item Code นี้');
+ const revision=productHistory_(ss,product).find(r=>r[0]===p.revisionId);
+ if(!revision)throw Error('Revision ไม่ตรงกับ Item Code หรือสถานะนี้');
  const previous=table_(ss,'PIM_Selections').filter(r=>r[0]===p.productId).pop();
  const at=previous?.[1]===p.revisionId?previous[2]:new Date().toISOString();
  if(previous?.[1]!==p.revisionId)append_(ss,'PIM_Selections',[[p.productId,p.revisionId,at]]);
@@ -323,11 +378,21 @@ function stock_(ss,code){
   for(let i=header+1;i<data.length;i++){
    const r=data[i];if(!r[cols.code]||(key&&itemKey_(r[cols.code])!==key))continue;
    const company=source.company||String(r[cols.company]||'').trim().toUpperCase();if(!company){missingCompany++;continue;}
-   matches.push({company,code:r[cols.code],location:r[cols.location]||'',status:r[cols.status]||'',categories:cols.categories<0?'':r[cols.categories]||'',qty:r[cols.qty]??''});
+   matches.push({company,code:r[cols.code],location:String(r[cols.location]||'').trim(),status:normStatus_(r[cols.status]||''),categories:cols.categories<0?'':r[cols.categories]||'',qty:r[cols.qty]??''});
   }
   if(missingCompany)warnings.push(name+' มี '+missingCompany+' แถวที่ไม่ได้ระบุ Company');
  }
  return {rows:matches,warnings,checkedAt:new Date().toISOString()};
+}
+function stockSlots_(rows){
+ const seen=new Set(),out=[];
+ for(const r of rows){
+  const company=String(r.company||'').trim().toUpperCase(),location=String(r.location||'').trim(),status=normStatus_(r.status||'');
+  const qty=r.qty===undefined||r.qty===null?'':String(r.qty).trim(),slotKey=stockSlotKey_(company,location,status);
+  if(seen.has(slotKey))continue;seen.add(slotKey);
+  out.push({company,location,status,qty,slotKey});
+ }
+ return out;
 }
 function validateItems_(ss,codes){
  if(!Array.isArray(codes)||!codes.length||codes.length>5000||codes.some(c=>typeof c!=='string'||!c.trim()||c.length>250))throw Error('ส่ง Item code ที่ต้องการตรวจสอบไม่เกิน 5,000 รายการ');
@@ -335,7 +400,69 @@ function validateItems_(ss,codes){
  for(const row of stock.rows){const key=itemKey_(row.code);if(!byCode.has(key))byCode.set(key,[]);byCode.get(key).push(row);}
  const readable=stock.rows.length>0&&!stock.warnings.length;
  const warnings=[...stock.warnings];if(!stock.rows.length)warnings.push('ยังไม่มีข้อมูลสต็อกที่อ่านได้ กรุณาตรวจชีต Stock_VPT_VSP');
- return {readable,warnings,checkedAt:stock.checkedAt,items:[...new Set(codes)].map(code=>{const rows=byCode.get(itemKey_(code))||[];return {code,found:readable?rows.length>0:null,locations:[...new Set(rows.filter(r=>String(r.location).trim()).map(r=>r.company+' · '+r.location))]};})};
+ return {readable,warnings,checkedAt:stock.checkedAt,items:[...new Set(codes)].map(code=>{const rows=byCode.get(itemKey_(code))||[];const slots=stockSlots_(rows);return {code,found:readable?rows.length>0:null,locations:[...new Set(rows.filter(r=>String(r.location).trim()).map(r=>r.company+' · '+r.location))],stocks:slots.map(s=>({company:s.company,location:s.location,status:s.status,qty:s.qty}))};})};
+}
+function splitPendingStock_(ss){
+ const stock=stock_(ss,'');
+ if(!stock.rows.length||stock.warnings.length)throw Error('ยังอ่านข้อมูลสต็อกไม่สำเร็จ จึงยังไม่แตกงานอัตโนมัติ');
+ const byCode=new Map();
+ for(const row of stock.rows){const key=itemKey_(row.code);if(!byCode.has(key))byCode.set(key,[]);byCode.get(key).push(row);}
+ const prodSheet=ss.getSheetByName('PIM_Products');
+ if(!prodSheet||prodSheet.getLastRow()<2)return {split:0,created:0,updated:0};
+ const doneImports=new Set(table_(ss,'PIM_Imports').map(r=>r[0]));
+ const lockedIds=new Set([...table_(ss,'PIM_Revisions').map(r=>r[1]),...table_(ss,'PIM_Selections').map(r=>r[0]),...table_(ss,'PIM_Files').filter(r=>r[2]==='photo').map(r=>r[3])]);
+ const cols=typeof prodSheet.getLastColumn==='function'?Math.min(Math.max(1,prodSheet.getLastColumn()),PIM_SCHEMA.PIM_Products.length):PIM_SCHEMA.PIM_Products.length;
+ const rawRows=prodSheet.getRange(2,1,prodSheet.getLastRow()-1,cols).getDisplayValues().map(r=>cols===PIM_SCHEMA.PIM_Products.length?r:[...r,...Array(PIM_SCHEMA.PIM_Products.length-cols).fill('')]);
+ const existingSlots=new Map();
+ for(const r of rawRows){
+  if(!r[0]||(!r[8]&&!r[9]&&!r[10]))continue;
+  const key=r[4]+'|'+itemKey_(r[1]);if(!existingSlots.has(key))existingSlots.set(key,new Set());
+  existingSlots.get(key).add(stockSlotKey_(r[8],r[9],r[10]));
+ }
+ const added=[],touched=[],affectedBatches=new Set();let split=0;
+ grow_(prodSheet,prodSheet.getLastRow(),PIM_SCHEMA.PIM_Products.length);
+ for(let i=0;i<rawRows.length;i++){
+  const r=rawRows[i];
+  if(!r[0]||!doneImports.has(r[4])||r[8]||r[9]||r[10]||lockedIds.has(r[0]))continue;
+  const slots=stockSlots_(byCode.get(itemKey_(r[1]))||[]);
+  if(!slots.length)continue;
+  const batchCode=r[4]+'|'+itemKey_(r[1]);
+  if(!existingSlots.has(batchCode))existingSlots.set(batchCode,new Set());
+  const used=existingSlots.get(batchCode);
+  const remaining=slots.filter(s=>!used.has(s.slotKey));
+  if(!remaining.length)continue;
+  const first=remaining[0];
+  prodSheet.getRange(i+2,9,1,4).setValues([[raw_(first.company),raw_(first.location),raw_(first.status),raw_(first.qty)]]);
+  used.add(first.slotKey);
+  const updatedRow=[...r.slice(0,8),first.company,first.location,first.status,first.qty];
+  touched.push(updatedRow);affectedBatches.add(r[4]);split++;
+  for(const slot of remaining.slice(1)){
+   const sibling=[uuid_(),r[1],r[2],r[3],r[4],r[5],r[6],r[7],slot.company,slot.location,slot.status,slot.qty];
+   added.push(sibling);touched.push(sibling);used.add(slot.slotKey);
+  }
+ }
+ if(added.length)append_(ss,'PIM_Products',added);
+ delete PIM_TABLE_CACHE.PIM_Products;
+ if(affectedBatches.size){
+  const allProducts=table_(ss,'PIM_Products');
+  const impSheet=ss.getSheetByName('PIM_Imports');
+  if(impSheet&&impSheet.getLastRow()>1){
+   const impRows=impSheet.getRange(2,1,impSheet.getLastRow()-1,PIM_SCHEMA.PIM_Imports.length).getDisplayValues();
+   impRows.forEach((imp,idx)=>{
+    if(!affectedBatches.has(imp[0]))return;
+    const count=allProducts.filter(p=>p[4]===imp[0]).length;
+    impSheet.getRange(idx+2,6).setValue(count);
+   });
+   delete PIM_TABLE_CACHE.PIM_Imports;
+  }
+  const cache={};
+  for(const prod of touched)writeData_(ss,prod,null,cache);
+  SpreadsheetApp.flush();
+ }
+ return {split,created:added.length,updated:touched.length};
+}
+function splitPendingStockNow(){
+ return pimCall({action:'splitPendingStock'});
 }
 // The bridge contains no account UI. Only the authorized GitHub origin can invoke
 // it, and responses are sent exclusively to that origin. Google sign-in/access

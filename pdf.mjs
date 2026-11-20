@@ -3,6 +3,30 @@ import {ANGLES,progress} from './core.mjs';
 // high-resolution JPEGs with native clickable Drive link annotations.
 const W=1240,H=1754,M=82,FONT='-apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, sans-serif';
 const ink='#1c1c1e',muted='#6c6c73',blue='#007aff';
+function stockPalette(status){
+ const s=String(status||'').trim().toUpperCase();
+ if(s==='GOOD')return {bg:'#eaf7ef',fg:'#1a7f46'};
+ if(s==='DAMAGE')return {bg:'#fdecec',fg:'#c62828'};
+ if(s==='INCOMPLETE')return {bg:'#fff3e0',fg:'#b25e00'};
+ if(s==='DISPOSAL')return {bg:'#f1eef8',fg:'#5e35b1'};
+ if(s==='QC')return {bg:'#e8f2ff',fg:'#005bb5'};
+ if(s==='HOLD')return {bg:'#fff8e1',fg:'#8d6e00'};
+ if(s==='BORROW')return {bg:'#e6f7f8',fg:'#007980'};
+ return {bg:'#f2f4f8',fg:'#4a5568'};
+}
+function stockScopeLine(product){
+ const parts=[product.stockCompany,product.stockLocation,product.stockStatus].map(v=>String(v||'').trim()).filter(Boolean);
+ if(!parts.length)return '';
+ const qty=product.stockQty!==undefined&&product.stockQty!==null&&String(product.stockQty).trim()!==''?'  ·  Qty '+String(product.stockQty).trim():'';
+ return parts.join('  ·  ')+qty;
+}
+export function pdfFilename(products,now=new Date()){
+ const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
+ if(products.length!==1)return 'PIM-Photo-Report-'+day+'.pdf';
+ const p=products[0],slug=v=>String(v||'').trim().replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
+ const parts=[p.code,p.stockCompany,p.stockLocation,p.stockStatus].map(slug).filter(Boolean);
+ return 'PIM-Photo-'+(parts.join('-')||'Item')+'-'+day+'.pdf';
+}
 function bytes(s){return new TextEncoder().encode(s);}
 export function assemblePdf(pages){
  const objects=[null,null],kids=[];
@@ -28,7 +52,9 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
  function line(text,x,y,size=24,weight=400,color=ink){font(size,weight,color);ctx.fillText(String(text),x,y);}
  function start(product,label,coverOnly=false){canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);links=[];pageNumber++;
   line('PIM.',M,66,38,700,blue);line('PHOTO STUDIO',M+104,82,17,600,muted);line(label,W-365,82,17,600,muted);ctx.fillStyle='#e5e5ea';ctx.fillRect(M,132,W-M*2,2);
-  y=168;if(coverOnly)return;for(const t of wrap(product.code,W-M*2,42,700)){line(t,M,y,42,700);y+=52;}for(const t of wrap(product.name,W-M*2,26,400)){line(t,M,y,26);y+=36;}y+=20;
+  y=168;if(coverOnly)return;for(const t of wrap(product.code,W-M*2,42,700)){line(t,M,y,42,700);y+=52;}for(const t of wrap(product.name,W-M*2,26,400)){line(t,M,y,26);y+=36;}
+  const scope=stockScopeLine(product);if(scope){const pal=stockPalette(product.stockStatus);line('Stock: '+scope,M,y+4,20,600,pal.fg);y+=34;}
+  y+=20;
  }
  async function finish(product){line(generated,M,H-68,16,400,muted);line('PIM PHOTO STUDIO  /  '+String(pageNumber).padStart(2,'0'),W-365,H-68,16,600,muted);
   const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',.94));if(!blob)throw Error('สร้างหน้า PDF ไม่สำเร็จ');pages.push({width:W,height:H,jpeg:new Uint8Array(await blob.arrayBuffer()),links,preview:blob});canvas.width=canvas.height=1;await new Promise(r=>setTimeout(r,0));
@@ -55,10 +81,18 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
   if(primary.fileId)links.push({url:'https://drive.google.com/file/d/'+primary.fileId+'/view',x:M,y:heroY,w:imageSize,h:imageSize});
   line('PRODUCT / ITEM CODE',textX,heroY+8,17,600,blue);
   let overflow=limited(product.code,textX,heroY+42,textWidth,40,700,3);
-  overflow=limited(product.name,textX,heroY+198,textWidth,25,500,3)||overflow;
+  const scope=stockScopeLine(product);
+  if(scope){
+   overflow=limited(product.name,textX,heroY+194,textWidth,24,500,2)||overflow;
+   const pal=stockPalette(product.stockStatus);
+   panel(textX,heroY+266,textWidth,40,pal.bg);
+   overflow=limited(scope,textX+16,heroY+276,textWidth-32,19,600,1,pal.fg)||overflow;
+  }else{
+   overflow=limited(product.name,textX,heroY+198,textWidth,25,500,3)||overflow;
+  }
   const complete=count.required===7;
-  panel(textX,heroY+314,textWidth,48,complete?'#eaf7ef':'#fff5df');
-  line(complete?'ถ่ายครบทั้ง 7 มุมบังคับ':'อยู่ระหว่างถ่ายภาพ',textX+18,heroY+327,21,600,complete?'#237a45':'#946000');
+  panel(textX,heroY+316,textWidth,48,complete?'#eaf7ef':'#fff5df');
+  line(complete?'ถ่ายครบทั้ง 7 มุมบังคับ':'อยู่ระหว่างถ่ายภาพ',textX+18,heroY+329,21,600,complete?'#237a45':'#946000');
   line('Revision '+String(product.revisionNumber||'ฉบับร่าง')+(product.dirty||!product.syncedAt?'  /  ฉบับร่างในเครื่อง':''),textX,heroY+382,18,500,muted);
   y=602;
   const cards=[{x:M,w:240,label:'ภาพทั้งหมด',value:String(count.total)+' รูป'},{x:M+258,w:240,label:'มุมบังคับ',value:count.required+' / 7 มุม'},{x:M+516,w:W-M*2-516,label:'ผู้ถ่ายภาพ',value:product.fields?.photographer||'ยังไม่ระบุ'}];
@@ -84,7 +118,7 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
   const extraDimensions=[['inner','Original Package (Inner)'],['outer','Original Package (Outer)'],['delivery','Delivery Package']].filter(([key])=>Object.values(p.dimensions?.[key]||{}).some(v=>v!==''&&v!==null));
   if(overflow||extraFields.length||extraDimensions.length){
    start(p,'PRODUCT DETAILS');
-   if(overflow){await block(p,'วัตถุประสงค์',p.purpose);await block(p,'ชื่อผู้ถ่าย',p.fields?.photographer);}
+   if(overflow){await block(p,'Stock (Company · Location · Status)',stockScopeLine(p));await block(p,'วัตถุประสงค์',p.purpose);await block(p,'ชื่อผู้ถ่าย',p.fields?.photographer);}
    for(const [key,label] of extraFields)await block(p,label,p.fields[key]);
    for(const [key,label] of (overflow?[['physical','Physical Product'],...extraDimensions]:extraDimensions)){const d=p.dimensions?.[key];if(d)await block(p,label,['width','length','height','net','gross'].map((k,i)=>['Width','Length','Height','Net Weight','Gross Weight'][i]+': '+(d[k]??'—')+(i<3?' cm':' kg')).join('   /   '));}
    await finish(p);
@@ -101,5 +135,5 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
    }await finish(p);
   }
  }
- return {blob:assemblePdf(pages),pages:pages.map(p=>p.preview),filename:'PIM-Photo-'+(products.length===1?products[0].code.replace(/[^\w-]/g,'_'):'Report')+'-'+new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())+'.pdf'};
+ return {blob:assemblePdf(pages),pages:pages.map(p=>p.preview),filename:pdfFilename(products)};
 }

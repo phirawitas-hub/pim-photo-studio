@@ -30,7 +30,8 @@ export function reconcileProduct(local,remote,revisions=[]){
  if(!local.newRevision&&productContent(local)===productContent(remote))return remote;
  if(!hasLocalEdits(local,remote,revisions))return remote;
  const changed=(local.baseRevision||null)!==(remote.baseRevision||null);
- return {...local,importSynced:true,sheetId:remote.sheetId,remoteUpdate:changed?remote:null};
+ const scope=remote.stockCompany!==undefined||remote.stockLocation!==undefined||remote.stockStatus!==undefined?{stockCompany:remote.stockCompany||'',stockLocation:remote.stockLocation||'',stockStatus:remote.stockStatus||'',stockQty:remote.stockQty??''}:{};
+ return {...local,...scope,importSynced:true,sheetId:remote.sheetId,remoteUpdate:changed?remote:null};
 }
 export function singleFlight(task){
  let pending;

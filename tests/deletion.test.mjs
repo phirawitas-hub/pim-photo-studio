@@ -11,3 +11,13 @@ test('Delete import removes only its Sheet rows and Drive files; confirmation is
 test('Delete preserves a revision and photos selected by another import',()=>{const f=fixture(true);f.ctx.deleteImport_(f.ss,f.p);assert.equal(f.rows.PIM_Revisions[0][1],'pb');assert.equal(f.rows.PIM_Files[0][3],'pb');assert.equal(f.rows.PIM_Selections[0][1],'ra');assert.deepEqual([...f.trashed],['source-a']);});
 test('Interrupted delete resumes from journal and rejects stale import writes',()=>{const f=fixture();f.setFail(true);assert.throws(()=>f.ctx.deleteImport_(f.ss,f.p),/network/);assert.equal(f.rows.PIM_Deletions[0][4],'pending');assert.throws(()=>f.ctx.assertActiveImport_(f.ss,'products',{batchId:'batch-a'}));f.setFail(false);f.ctx.deleteImport_(f.ss,f.p);assert.equal(f.rows.PIM_Deletions[0][4],'complete');assert.equal(f.trashed.size,2);});
 test('Physical row deletion groups rows bottom-up without clearing other cells',()=>{const ctx=vm.createContext({});vm.runInContext(code,ctx);const rows=[['a'],['keep'],['b'],['c'],['keep2']],calls=[];ctx.removeRows_({getSheetByName:()=>({getLastRow:()=>6,getLastColumn:()=>1,getRange:()=>({getDisplayValues:()=>rows}),deleteRows:(start,count)=>calls.push([start,count])})},'Data',r=>['a','b','c'].includes(r[0]));assert.deepEqual(calls,[[4,2],[2,1]]);});
+
+test('bounded deletion reports confirmed files and resumes without removing rows early',()=>{
+ const f=fixture();const payload={...f.p,fileLimit:1};
+ const partial=f.ctx.deleteImport_(f.ss,payload);
+ assert.equal(partial.processed,1);assert.equal(partial.total,2);assert.equal(partial.deleted,false);
+ assert.equal(f.rows.PIM_Products.length,2);assert.equal(f.trashed.size,1);
+ assert.equal(f.ctx.deleteImport_(f.ss,payload).deleted,true);
+ assert.equal(f.trashed.size,2);assert.equal(f.rows.PIM_Products.length,1);
+ assert.equal(f.ctx.deleteImport_(f.ss,payload).deleted,true);
+});

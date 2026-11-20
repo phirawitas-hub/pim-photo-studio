@@ -5,15 +5,17 @@ function decode(value,max){
  if(!value||typeof value.data!=='string'||value.data.length>Math.ceil(max/3)*4)throw Error('ไฟล์ในฉบับร่างใหญ่เกินกำหนด');
  const bytes=Uint8Array.from(atob(value.data),c=>c.charCodeAt(0));if(bytes.length>max)throw Error('ไฟล์ใหญ่เกินกำหนด');return new Blob([bytes],{type:value.type||'application/octet-stream'});
 }
-export async function exportDrafts(){
+export async function exportDrafts(report=()=>{}){
  const products=await db.all('products'),imports=await db.all('imports'),allAssets=await db.all('assets');
  const used=new Set(products.flatMap(p=>Object.values(p.photos||{}).flat().map(ph=>ph.id)));const assets=allAssets.filter(a=>used.has(a.id));
  const snapshot={format:'pim-drafts-v1',products,imports:[],assets:[]};
- for(const b of imports)snapshot.imports.push({...b,file:b.file?await encode(b.file):null});
- for(const a of assets)snapshot.assets.push({...a,blob:a.blob?await encode(a.blob):null});
+ let done=0;const total=imports.length+assets.length;
+ const advance=()=>report('เตรียมไฟล์ฉบับร่าง '+(++done)+'/'+total,95*done/total);
+ for(const b of imports){snapshot.imports.push({...b,file:b.file?await encode(b.file):null});advance();}
+ for(const a of assets){snapshot.assets.push({...a,blob:a.blob?await encode(a.blob):null});advance();}
  const url=URL.createObjectURL(new Blob([JSON.stringify(snapshot)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='pim-drafts-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
-export async function restoreDrafts(file){
+export async function restoreDrafts(file,report=()=>{}){
  if(file.size>300*1024*1024)throw Error('ไฟล์ฉบับร่างต้องไม่เกิน 300 MB');
  const data=JSON.parse(await file.text());
  if(data.format!=='pim-drafts-v1'||!['products','imports','assets'].every(k=>Array.isArray(data[k])))throw Error('ไม่ใช่ไฟล์ฉบับร่าง PIM');
@@ -27,6 +29,7 @@ export async function restoreDrafts(file){
  for(const b of data.imports){if(!b.workbook?.sheets||!Array.isArray(b.workbook.sheets))throw Error('ไม่พบข้อมูลต้นฉบับ');if(b.driveId)id(b.driveId);if(b.sheetId)id(b.sheetId);if(b.file)b.file=decode(b.file,25*1024*1024);}
  for(const a of data.assets){if(a.blob)a.blob=decode(a.blob,20*1024*1024);}
  // Validate the entire transfer before writing. Existing local work always wins.
- for(const [store,rows] of [['assets',data.assets],['imports',data.imports],['products',data.products]])for(const row of rows)if(!await db.get(store,row.id))await db.put(store,row);
+ let done=0;const total=data.assets.length+data.imports.length+data.products.length;
+ for(const [store,rows] of [['assets',data.assets],['imports',data.imports],['products',data.products]])for(const row of rows){if(!await db.get(store,row.id))await db.put(store,row);report('กู้คืนข้อมูล '+(++done)+'/'+total,95*done/total);}
  return data.products.length;
 }

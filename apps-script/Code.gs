@@ -645,7 +645,16 @@ function deleteImport_(ss,p){
  if(!table_(ss,'PIM_Deletions').some(r=>r[0]===p.batchId))append_(ss,'PIM_Deletions',[[p.batchId,new Date().toISOString(),plan.name,JSON.stringify(plan),'pending']]);
  for(const m of plan.revisionMoves)moveOwner_(ss,'PIM_Revisions',0,m.id,1,m.owner);
  for(const m of plan.fileMoves)moveOwner_(ss,'PIM_Files',1,m.id,3,m.owner);
- for(const fileId of plan.trash){const file=DriveApp.getFileById(fileId);if(!file.isTrashed())file.setTrashed(true);}
+ const cursor=plan.trashCursor||0;
+ const limit=Number.isInteger(p.fileLimit)?Math.max(1,Math.min(20,p.fileLimit)):plan.trash.length;
+ const end=Math.min(plan.trash.length,cursor+limit);
+ for(const fileId of plan.trash.slice(cursor,end)){const file=DriveApp.getFileById(fileId);if(!file.isTrashed())file.setTrashed(true);}
+ if(end<plan.trash.length){
+  plan.trashCursor=end;
+  const journalRow=table_(ss,'PIM_Deletions').findIndex(r=>r[0]===p.batchId)+2;
+  ss.getSheetByName('PIM_Deletions').getRange(journalRow,4).setValues([[JSON.stringify(plan)]]);
+  SpreadsheetApp.flush();return {deleted:false,processed:end,total:plan.trash.length};
+ }
  const ids=new Set(plan.productIds),revs=new Set(plan.revisionIds),files=new Set(plan.trash);
  const data=ss.getSheetByName('Data');if(data&&data.getLastRow()){const h=data.getRange(1,1,1,data.getLastColumn()).getDisplayValues()[0],id=h.indexOf('PIM Product ID'),batch=h.indexOf('Import ID');if(id<0&&batch<0)throw Error('Data ไม่มีคอลัมน์ระบุงาน จึงยังไม่ลบข้อมูล');removeRows_(ss,'Data',r=>ids.has(r[id])||r[batch]===p.batchId);}
  removeRows_(ss,'PIM_ClosedJobs',r=>ids.has(r[0]));removeRows_(ss,'PIM_Selections',r=>ids.has(r[0]));removeRows_(ss,'PIM_Revisions',r=>revs.has(r[0]));removeRows_(ss,'PIM_Files',r=>files.has(r[1]));removeRows_(ss,'PIM_Source',r=>r[0]===p.batchId);removeRows_(ss,'PIM_Products',r=>ids.has(r[0]));removeRows_(ss,'PIM_Imports',r=>r[0]===p.batchId);

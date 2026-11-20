@@ -8,7 +8,7 @@ export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl}){
  openModal(modalHeader('ดูรูป · '+product.code)+
  '<div class="photo-viewer"><div class="viewer-info"><div><strong>'+esc(product.name)+'</strong><p>Revision '+esc(product.revisionNumber||'ฉบับร่าง')+(product.dirty?' · มีฉบับร่างที่ยังไม่บันทึก':'')+' · โหมดดูรูป</p></div><label>มุมภาพ<select id="viewer-angle"><option value="">ทุกมุม · '+all.length+' รูป</option>'+ANGLES.filter(a=>all.some(p=>p.angle===a.id)).map(a=>'<option value="'+a.id+'">'+esc(a.name)+'</option>').join('')+'</select></label></div>'+
  '<div class="viewer-stage"><button id="viewer-prev" class="viewer-arrow" aria-label="ภาพก่อนหน้า">‹</button><div class="viewer-canvas"><img id="viewer-image" alt="" hidden><div id="viewer-message" role="status" aria-live="polite">กำลังโหลดภาพ…</div><button id="viewer-retry" hidden>ลองโหลดภาพอีกครั้ง</button></div><button id="viewer-next" class="viewer-arrow" aria-label="ภาพถัดไป">›</button></div>'+
- '<div class="viewer-caption"><div><strong id="viewer-label"></strong><small id="viewer-filename"></small></div><span id="viewer-count"></span></div><div id="viewer-thumbnails" class="viewer-thumbnails" aria-label="เลือกรูป"></div><p class="viewer-help">ใช้ปุ่ม ← → เพื่อเปลี่ยนรูป · Esc เพื่อปิด · ภาพที่เคยเปิดดูจะเก็บไว้ในเครื่องเพื่อเปิดครั้งถัดไปได้เร็วขึ้น</p></div>');
+ '<div class="viewer-caption"><div><strong id="viewer-label"></strong><small id="viewer-filename"></small></div><span id="viewer-count"></span></div><small id="viewer-load-progress" role="status"></small><div id="viewer-thumbnails" class="viewer-thumbnails" aria-label="เลือกรูป"></div><p class="viewer-help">ใช้ปุ่ม ← → เพื่อเปลี่ยนรูป · Esc เพื่อปิด · ภาพที่เคยเปิดดูจะเก็บไว้ในเครื่องเพื่อเปิดครั้งถัดไปได้เร็วขึ้น</p></div>');
  modal.classList.add('photo-viewer-modal');
  const q=s=>modal.querySelector(s),img=q('#viewer-image'),message=q('#viewer-message'),retry=q('#viewer-retry');
  function setMessage(text){message.textContent=text;message.hidden=false;img.hidden=true;}
@@ -32,8 +32,14 @@ export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl}){
   }catch(e){if(closed||ticket!==sequence)return;setMessage('โหลดภาพไม่สำเร็จ: '+(e.message||'กรุณาลองอีกครั้ง'));retry.hidden=false;}
  }
  async function loadThumbnails(){
-  const generation=++thumbnailGeneration,buttons=[...modal.querySelectorAll('[data-viewer-index]')],list=[...items];let cursor=0;
-  async function worker(){while(cursor<list.length&&!closed&&generation===thumbnailGeneration){const i=cursor++,button=buttons[i],thumb=button.querySelector('img'),placeholder=button.querySelector('.viewer-thumb>span');try{const url=await photoUrl(list[i].photo);if(closed||generation!==thumbnailGeneration||!button.isConnected)return;if(url){thumb.onload=()=>{if(button.isConnected){thumb.hidden=false;placeholder.hidden=true;}};thumb.onerror=()=>{placeholder.textContent='โหลดไม่ได้';thumb.hidden=true;};thumb.src=url;}else{placeholder.textContent='รอ Google';button.title='เชื่อมต่อ Google เพื่อโหลดภาพ';}}catch{if(button.isConnected){placeholder.textContent='โหลดไม่ได้';button.title='โหลดภาพไม่สำเร็จ กรุณาลองใหม่';}}}}
+  const generation=++thumbnailGeneration,buttons=[...modal.querySelectorAll('[data-viewer-index]')],list=[...items];let cursor=0,loaded=0,finished=0;
+  const indicator=q('#viewer-load-progress');
+  function update(){
+   if(closed||generation!==thumbnailGeneration)return;
+   indicator.textContent='โหลดภาพย่อ '+loaded+'/'+list.length+' · '+Math.floor(100*loaded/Math.max(1,list.length))+'%'+(finished===list.length&&loaded<finished?' · บางรูปยังโหลดไม่ได้':'');
+  }
+  update();
+  async function worker(){while(cursor<list.length&&!closed&&generation===thumbnailGeneration){const i=cursor++,button=buttons[i],thumb=button.querySelector('img'),placeholder=button.querySelector('.viewer-thumb>span');try{const url=await photoUrl(list[i].photo);if(closed||generation!==thumbnailGeneration||!button.isConnected)return;if(url){thumb.onload=()=>{if(button.isConnected){thumb.hidden=false;placeholder.hidden=true;thumb.onload=null;thumb.onerror=null;loaded++;finished++;update();}};thumb.onerror=()=>{placeholder.textContent='โหลดไม่ได้';thumb.hidden=true;finished++;update();};thumb.src=url;}else{finished++;update();placeholder.textContent='รอ Google';button.title='เชื่อมต่อ Google เพื่อโหลดภาพ';}}catch{if(button.isConnected){finished++;update();placeholder.textContent='โหลดไม่ได้';button.title='โหลดภาพไม่สำเร็จ กรุณาลองใหม่';}}}}
   await Promise.all(Array.from({length:Math.min(3,list.length)},worker));
  }
  function thumbnails(){

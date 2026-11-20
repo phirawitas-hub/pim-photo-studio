@@ -14,7 +14,7 @@ function rpc(action,payload={}){
  return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Google ตอบกลับช้า ยังแสดงข้อมูลเดิม กรุณารีเฟรชอีกครั้ง')),timeoutMs);google.script.run.withSuccessHandler(value=>{clearTimeout(timer);resolve(value);}).withFailureHandler(e=>{clearTimeout(timer);reject(Error(e.message||String(e)));}).pimCall(request);});
 }
 export async function connect(c,usePopup=false){configure(c);online=false;if(usePopup&&!hosted())await prepareBridge(true);const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);online=true;}
-export async function syncData(batchId){let offset=0;do{const r=await rpc('syncData',{batchId,offset});offset=r.next;}while(offset!==null);}
+export async function syncData(batchId,report=()=>{}){let offset=0;do{const r=await rpc('syncData',{batchId,offset});offset=r.next;report(r.next??r.total,r.total);}while(offset!==null);}
 export async function checkConnection(){return title;}
 export async function readTable(name){return rpc('read',{name});}
 async function base64(blob){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error('อ่านไฟล์ไม่สำเร็จ'));reader.readAsDataURL(blob);});}
@@ -22,37 +22,45 @@ async function upload(blob,p){return rpc('upload',{...p,mime:blob.type||'applica
 function assertSheet(record){if(record.sheetId&&record.sheetId!==config.sheetId)throw Error('ข้อมูลนี้เป็นของชีตอื่น กรุณาเลือกชีตเดิม');}
 export async function syncImport(batch,products,onProgress=()=>{}){
  assertSheet(batch);
+ const syncRows=()=>syncData(batch.id,(done,total)=>onProgress('บันทึกลงชีต '+done+'/'+total+' งาน',80+19*done/Math.max(1,total)));
  const imports=await readTable('PIM_Imports');
- if(imports.some(r=>r[0]===batch.id)){await syncData(batch.id);batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);return;}
- onProgress('กำลังตรวจ Item code กับสต็อกล่าสุดก่อนนำเข้า');
+ if(imports.some(r=>r[0]===batch.id)){await syncRows();batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);return;}
+ onProgress('กำลังตรวจ Item code กับสต็อกล่าสุดก่อนนำเข้า',5);
  requireValidImport(products,await validateItems([...new Set(products.map(p=>p.code))]));
- onProgress('เก็บไฟล์ต้นฉบับใน Drive ผ่าน Apps Script');
+ onProgress('เก็บไฟล์ต้นฉบับใน Drive',15);
  batch.driveId=await upload(batch.file,{key:'import-'+batch.id,kind:'import',name:batch.name});await db.put('imports',batch);
  const source={properties:batch.workbook.properties,sheetProperties:batch.workbook.sheetProperties,names:batch.workbook.names,sheets:batch.workbook.sheets.map(s=>({name:s.name,range:s.range,merges:s.merges,cells:s.cells}))};
  const chunks=chunkText(JSON.stringify(source));
- for(let n=0;n<chunks.length;n++)await rpc('sourceMeta',{batchId:batch.id,part:n+1,text:chunks[n]});
+ for(let n=0;n<chunks.length;n++){
+  onProgress('บันทึกข้อมูลต้นฉบับ ส่วน '+(n+1)+'/'+chunks.length,35+25*n/chunks.length);
+  await rpc('sourceMeta',{batchId:batch.id,part:n+1,text:chunks[n]});
+ }
  const records=products.map(p=>[p.id,p.code,p.name,p.purpose,batch.id,p.sourceSheet,p.sourceRow,p.createdAt,p.stockCompany||'',p.stockLocation||'',p.stockStatus||'',p.stockQty??'']);
- for(let start=0;start<records.length;start+=250)await rpc('products',{rows:records.slice(start,start+250)});
+ for(let start=0;start<records.length;start+=250){
+  onProgress('บันทึกรายการสินค้า '+start+'/'+records.length,60+18*start/records.length);
+  await rpc('products',{rows:records.slice(start,start+250)});
+ }
+ onProgress('กำลังยืนยันไฟล์นำเข้า',79);
  await rpc('finishImport',{row:[batch.id,batch.name,batch.createdAt,batch.driveId,batch.workbook.sheets.map(s=>s.name).join(' | '),products.length]});
- await syncData(batch.id);batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);
+ await syncRows();batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);
 }
 export async function saveProduct(p,onProgress=()=>{}){
  validatePhotos(p);assertSheet(p);if(!p.dirty&&p.baseRevision)return;
  const batch=await db.get('imports',p.importId);
- if(batch){assertSheet(batch);if(!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),onProgress);}
+ if(batch){assertSheet(batch);if(!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),(msg,pct)=>onProgress(msg,pct/4));}
  const history=await itemHistory(p.code,p),latest=history.at(-1);
  if(!String(p.fields?.photographer||'').trim())throw Error('กรุณาระบุชื่อผู้ถ่าย');
  if(p.pendingRevision&&latest?.[0]===p.pendingRevision){await rpc('revision',{id:p.pendingRevision,productId:p.id});p.baseRevision=p.pendingRevision;p.itemHead=p.pendingRevision;p.revisionNumber=history.length;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.syncedAt=latest[2];p.sheetId=config.sheetId;await db.put('products',p);return;}
  if(!p.itemHead&&!p.baseRevision&&latest){p.itemHead=latest[0];await db.put('products',p);}
  if((latest?.[0]||null)!==(p.itemHead||p.baseRevision||null))throw Error('มีเวอร์ชันใหม่ในชีต กรุณาตรวจประวัติก่อนบันทึก');
- await uploadProductPhotos(p,onProgress);
+ await uploadProductPhotos(p,(message,percent)=>onProgress(message,25+0.65*percent));
  p.pendingRevision=p.pendingRevision||uid();await db.put('products',p);
  const photos=Object.fromEntries(ANGLES.map(a=>[a.id,(p.photos?.[a.id]||[]).map(x=>({id:x.id,fileId:x.fileId,name:x.name||'',size:x.size||0}))]));
  const snapCompany=String(p.stockCompany||'').trim().toUpperCase(),snapLocation=String(p.stockLocation||'').trim(),snapStatus=normalizeInventoryStatus(p.stockStatus||'');
  const snapQty=String(p.liveStockQty!==undefined&&p.liveStockQty!==''?p.liveStockQty:(p.stockQty??'')).trim();
  const meta={fields:p.fields||{},dimensions:p.dimensions||{},purpose:p.purpose||''};
  if(snapCompany||snapLocation||snapStatus)meta.stockSnapshot={company:snapCompany,location:snapLocation,status:snapStatus,qty:snapQty};
- onProgress('บันทึกเวอร์ชันลง Google Sheet');
+ onProgress('บันทึกเวอร์ชันลง Google Sheet',92);
  const r=await rpc('revision',{id:p.pendingRevision,productId:p.id,baseRevision:p.itemHead||p.baseRevision||null,meta,photos});
  p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.sheetId=config.sheetId;p.syncedAt=r.at;if(r.stockSnapshot){p.stockSnapshot=r.stockSnapshot;p.stockQty=r.stockSnapshot.qty;}await db.put('products',p);
 }
@@ -82,7 +90,15 @@ export const updateJobLocations=payload=>rpc('updateJobLocations',payload);
 export const saveBranding=brand=>rpc('branding',brand);
 
 export const deletePreview=(batchId,batchName)=>rpc('deletePreview',{batchId,batchName});
-export const deleteImport=(batchId,confirmName)=>rpc('deleteImport',{batchId,batchName:confirmName,confirmName});
+export async function deleteImport(batchId,confirmName,onProgress=()=>{}){
+ let result;
+ do{
+  result=await rpc('deleteImport',{batchId,batchName:confirmName,confirmName,fileLimit:8});
+  if(result.deleted)return result;
+  if(!Number.isInteger(result.processed)||!result.total)throw Error('ไม่ได้รับผลการลบไฟล์จาก Google กรุณาลองอีกครั้ง');
+  onProgress('ย้ายไฟล์ไปถังขยะ '+result.processed+'/'+result.total+' ไฟล์',85*result.processed/result.total);
+ }while(!result.deleted);
+}
 
 export async function uploadProductPhotos(p,onProgress=()=>{}){
  assertSheet(p);

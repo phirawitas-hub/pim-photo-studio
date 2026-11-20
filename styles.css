@@ -293,3 +293,9 @@ dialog:has(.import-review) {
 
 .badge.closed-job{background:var(--fill);color:var(--muted);border:1px solid var(--line)}
 .stock-table .job-close{margin:3px 0}.product-row-actions{flex-wrap:wrap}
+
+#busy:not([hidden]){display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 10px;max-width:min(480px,calc(100vw - 30px));pointer-events:none}
+#busy progress{grid-column:2 / -1;width:100%;height:6px;accent-color:var(--teal)}
+#busy-percent{font-variant-numeric:tabular-nums;color:var(--teal-dark)}
+#busy[hidden]{display:none}
+.photo-load-status,#viewer-load-progress{display:block;padding:6px 16px;color:var(--muted);font-variant-numeric:tabular-nums}

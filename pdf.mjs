@@ -55,7 +55,7 @@ export function assemblePdf(pages){
  return new Blob(chunks,{type:'application/pdf'});
 }
 export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{}){
- if(!products.length)throw Error('เลือกสินค้าที่มีรูปอย่างน้อย 1 รายการ');if(products.length>10)throw Error('ส่งออกครั้งละไม่เกิน 10 รายการ เพื่อให้รูปคมชัดและไม่ใช้หน่วยความจำมากเกินไป');
+ if(!products.length)throw Error('เลือกสินค้าที่มีรูปอย่างน้อย 1 รายการ');
  const totalWork=products.reduce((sum,p)=>sum+progress(p).total+1,0);let completedWork=0;const notify=message=>onProgress(message,Math.floor(completedWork/totalWork*100));
  const pages=[];let canvas,ctx,links,y,pageNumber=0;const generated=new Date().toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false});
  function font(size=24,weight=400,color=ink){ctx.font=weight+' '+size+'px '+FONT;ctx.fillStyle=color;ctx.textBaseline='top';}

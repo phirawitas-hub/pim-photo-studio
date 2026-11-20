@@ -52,11 +52,12 @@ function pimCall(request) {
     if (request.action==='hello') return {title:ss.getName(),sheetId:ss.getId()};
     if (request.action==='read') return table_(ss,p.name);
     if (request.action==='workspace') return workspace_(ss);
+    if (request.action==='snapshot' && p.compact) return listSnapshot_(ss,p);
     if (request.action==='snapshot') return Object.assign(workspace_(ss),{closedJobs:table_(ss,'PIM_ClosedJobs'),products:table_(ss,'PIM_Products'),revisions:table_(ss,'PIM_Revisions'),selections:table_(ss,'PIM_Selections')});
-    if (request.action==='stock') return stock_(ss,p.code);
+    if (request.action==='stock') return stock_(ss,p.code,Array.isArray(p.codes)?new Set(p.codes.map(itemKey_)):null);
     if (request.action==='validateItems') return validateItems_(ss,p.codes);
     if (request.action==='itemHistory') return itemHistory_(ss,p);
-    if (request.action==='photo') return photo_(ss,p.fileId);
+    if (request.action==='photo') return photo_(ss,p.fileId,p.thumbnail===true);
     if(request.action==='deletePreview')return deletePreview_(ss,p);
     schema_(ss);
     if(request.action!=='deleteImport')assertActiveImport_(ss,request.action,p);
@@ -97,6 +98,10 @@ function header_(sheet,name,allowMigrate) {
   if (!sheet.getLastRow()) return;
   const lastCol=typeof sheet.getLastColumn==='function'?Math.max(1,sheet.getLastColumn()):expected.length;
   const current=sheet.getRange(1,1,1,Math.min(lastCol,expected.length)).getDisplayValues()[0];
+  validateHeader_(sheet,name,current,allowMigrate);
+}
+function validateHeader_(sheet,name,current,allowMigrate){
+  const expected=PIM_SCHEMA[name];
   while(current.length&&!current[current.length-1])current.pop();
   if (current.join('|')===expected.join('|')) return;
   if (name==='PIM_Products'&&current.join('|')===expected.slice(0,8).join('|')) {
@@ -119,10 +124,13 @@ let PIM_TABLE_CACHE={};
 function table_(ss,name) {
   if(PIM_TABLE_CACHE[name])return PIM_TABLE_CACHE[name];
   if (!PIM_SCHEMA[name]) throw Error('ไม่รองรับตารางนี้');
-  const s=ss.getSheetByName(name); if (!s) return [];header_(s,name,false);
+  const s=ss.getSheetByName(name);if(!s)return [];
+  const count=s.getLastRow();if(!count)return [];
   const expectedLen=PIM_SCHEMA[name].length;
   const cols=typeof s.getLastColumn==='function'?Math.min(Math.max(1,s.getLastColumn()),expectedLen):expectedLen;
-  const rows=s.getLastRow()<2?[]:s.getRange(2,1,s.getLastRow()-1,cols).getDisplayValues().filter(r=>r[0]);
+  const values=s.getRange(1,1,count,cols).getDisplayValues();
+  validateHeader_(s,name,values.shift(),false);
+  const rows=values.filter(r=>r[0]);
   return PIM_TABLE_CACHE[name]=cols===expectedLen?rows:rows.map(r=>[...r,...Array(expectedLen-cols).fill('')]);
 }
 function raw_(v) {
@@ -228,10 +236,13 @@ function revision_(ss,p) {
   selectRevision_(ss,{productId:p.productId,revisionId:p.id});
   SpreadsheetApp.flush();return {id:p.id,at,number:rows.length+1,stockSnapshot:metaObj.stockSnapshot||null};
 }
-function photo_(ss,fileId) {
+function photo_(ss,fileId,thumbnail) {
   const row=table_(ss,'PIM_Files').find(r=>r[1]===fileId&&r[2]==='photo');
   if(!row)throw Error('ไม่พบรูปของแอปนี้');
-  const blob=DriveApp.getFileById(fileId).getBlob();return {mime:blob.getContentType(),base64:Utilities.base64Encode(blob.getBytes())};
+  const file=DriveApp.getFileById(fileId);
+  const blob=thumbnail?file.getThumbnail():file.getBlob();
+  if(!blob)return null;
+  return {thumbnail:!!thumbnail,mime:blob.getContentType(),base64:Utilities.base64Encode(blob.getBytes())};
 }
 
 // Data is the human-readable working table. PIM_* retain revision/audit records.
@@ -375,7 +386,7 @@ function selectRevision_(ss,p){
  if(previous?.[1]!==p.revisionId)append_(ss,'PIM_Selections',[[p.productId,p.revisionId,at]]);
  writeData_(ss,product,revision,{});return {revision,at};
 }
-function stock_(ss,code){
+function stock_(ss,code,codes){
  const matches=[],warnings=[],key=itemKey_(code),combined=ss.getSheetByName('Stock_VPT_VSP');
  const sources=combined?[{name:'Stock_VPT_VSP',sheet:combined}]:['VP','VSP'].map(company=>({name:'Stock_'+company,company,sheet:ss.getSheetByName('Stock_'+company)}));
  for(const source of sources){
@@ -387,7 +398,7 @@ function stock_(ss,code){
   if(required.some(k=>cols[k]<0)){warnings.push(name+' หัวคอลัมน์ไม่ครบ: '+required.filter(k=>cols[k]<0).join(', '));continue;}
   let missingCompany=0;
   for(let i=header+1;i<data.length;i++){
-   const r=data[i];if(!r[cols.code]||(key&&itemKey_(r[cols.code])!==key))continue;
+   const r=data[i];if(!r[cols.code]||(key&&itemKey_(r[cols.code])!==key)||(codes&&!codes.has(itemKey_(r[cols.code]))))continue;
    const company=source.company||String(r[cols.company]||'').trim().toUpperCase();if(!company){missingCompany++;continue;}
    matches.push({company,code:r[cols.code],location:String(r[cols.location]||'').trim(),status:normStatus_(r[cols.status]||''),categories:cols.categories<0?'':r[cols.categories]||'',qty:r[cols.qty]??''});
   }
@@ -568,10 +579,48 @@ function bridge_(channel){
  return HtmlService.createHtmlOutput(html).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
-function workspace_(ss){
-
- const s=ss.getSheetByName('Data'),rows=s&&s.getLastRow()?s.getDataRange().getDisplayValues():[],headers=rows.shift()||[],col=h=>headers.indexOf(h);
- return {branding:branding_(ss),options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),deletions:table_(ss,'PIM_Deletions').map(r=>({id:r[0],name:r[2],status:r[4]})),imports:table_(ss,'PIM_Imports').filter(r=>!table_(ss,'PIM_Deletions').some(d=>d[0]===r[0])),stock:stock_(ss,''),data:rows.map(r=>({id:r[col('PIM Product ID')],requester:r[col('ชื่อผู้ขอ')]||'',requestDate:r[col('วันที่')]||'',code:r[col('รหัสสินค้า')]||''})),at:new Date().toISOString()};
+function listData_(ss){
+ const sheet=ss.getSheetByName('Data'),count=sheet?sheet.getLastRow()-1:0;
+ if(count<=0)return [];
+ const headers=sheet.getRange(1,1,1,sheet.getLastColumn()).getDisplayValues()[0];
+ const fields={id:'PIM Product ID',requester:'ชื่อผู้ขอ',requestDate:'วันที่',code:'รหัสสินค้า'};
+ const columns=Object.entries(fields).map(([field,name])=>({field,col:headers.indexOf(name)})).filter(c=>c.col>=0).sort((a,b)=>a.col-b.col);
+ const result=Array.from({length:count},()=>({id:'',requester:'',requestDate:'',code:''}));
+ // Group neighbouring columns in one Sheets call. Skip the wide photo columns.
+ while(columns.length){
+  const group=[columns.shift()],first=group[0].col;
+  while(columns.length&&columns[0].col-group[group.length-1].col<=4)group.push(columns.shift());
+  const values=sheet.getRange(2,first+1,count,group[group.length-1].col-first+1).getDisplayValues();
+  values.forEach((row,i)=>group.forEach(c=>result[i][c.field]=row[c.col-first]));
+ }
+ return result;
+}
+function workspace_(ss,listStock){
+ const deletions=table_(ss,'PIM_Deletions').map(r=>({id:r[0],name:r[2],status:r[4]}));
+ const deleted=new Set(deletions.map(d=>d.id));
+ return {branding:branding_(ss),options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),deletions,
+  imports:table_(ss,'PIM_Imports').filter(r=>!deleted.has(r[0])),stock:listStock||stock_(ss,''),data:listData_(ss),at:new Date().toISOString()};
+}
+function listSnapshot_(ss,request){
+ const products=table_(ss,'PIM_Products'),revisions=table_(ss,'PIM_Revisions'),selections=table_(ss,'PIM_Selections');
+ const response=workspace_(ss,{rows:[],warnings:[]});
+ const batches=new Set(response.imports.map(r=>r[0]));
+ const legacy=new Set(products.filter(r=>batches.has(r[4])&&!r[8]&&!r[9]&&!r[10]).map(r=>itemKey_(r[1])));
+ response.legacyCodes=[...legacy];
+ const latest=new Map(),selected=new Map(selections.map(r=>[r[0],r[1]]));
+ revisions.forEach(r=>latest.set(r[1],r[0]));
+ const needed=new Set(Array.isArray(request.bases)?request.bases:[]);
+ products.forEach(r=>needed.add(selected.get(r[0])||latest.get(r[0])));
+ // Keep short history entries for revision numbering and optimistic concurrency.
+ Object.assign(response,{products,selections,closedJobs:table_(ss,'PIM_ClosedJobs'),
+  revisions:revisions.map(r=>needed.has(r[0])?r:r.slice(0,3))});
+ const at=response.at;delete response.at;
+ const tags={},parts={};
+ for(const [key,value] of Object.entries(response)){
+  tags[key]=Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,JSON.stringify(value),Utilities.Charset.UTF_8));
+  if(tags[key]!==request.tags?.[key])parts[key]=value;
+ }
+ return {parts,tags,at};
 }
 function option_(ss,p){
  if(!['photographer','remark'].includes(p.kind)||!['add','remove'].includes(p.operation))throw Error('ตัวเลือกไม่ถูกต้อง');

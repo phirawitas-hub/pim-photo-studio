@@ -2,7 +2,7 @@ import {ANGLES,esc} from './core.mjs';
 export function viewerPhotos(product){
  return ANGLES.flatMap(angle=>(product.photos?.[angle.id]||[]).map((photo,index)=>({photo,angle:angle.id,label:angle.name+' '+(index+1),thai:angle.thai})));
 }
-export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl}){
+export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl,thumbnailUrl=photoUrl}){
  const all=viewerPhotos(product);let items=all,index=0,sequence=0,closed=false,thumbnailGeneration=0;
  if(!all.length)return;
  openModal(modalHeader('ดูรูป · '+product.code)+
@@ -21,15 +21,19 @@ export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl}){
   q('#viewer-prev').disabled=index===0;q('#viewer-next').disabled=index===items.length-1;
   modal.querySelectorAll('[data-viewer-index]').forEach(b=>{const selected=Number(b.dataset.viewerIndex)===index;b.classList.toggle('selected',selected);b.setAttribute('aria-pressed',String(selected));if(selected)b.scrollIntoView({block:'nearest',inline:'nearest'});});
   setMessage('กำลังโหลดภาพ…');
+  let originalReady=false;
   try{
-   const url=await photoUrl(item.photo);if(closed||ticket!==sequence)return;
+   thumbnailUrl(item.photo,()=>!closed&&ticket===sequence).then(preview=>{
+    if(preview&&!originalReady&&!closed&&ticket===sequence){img.alt=item.label;img.src=preview;img.hidden=false;}
+   }).catch(()=>{});
+   const url=await photoUrl(item.photo);originalReady=true;if(closed||ticket!==sequence)return;
    if(!url){setMessage('รูปนี้อยู่ใน Google Drive กรุณารอการเชื่อมต่อ แล้วกดลองโหลดอีกครั้ง');retry.hidden=false;return;}
    img.alt=item.label+' · '+product.code;
    img.onload=()=>{if(closed||ticket!==sequence)return;img.hidden=false;message.hidden=true;};
    img.onerror=()=>{if(closed||ticket!==sequence)return;setMessage('ไม่สามารถแสดงภาพนี้ได้');retry.hidden=false;};
    img.src=url;
-   const thumb=q('[data-viewer-index="'+index+'"] img');if(thumb){thumb.src=url;thumb.hidden=false;}
-  }catch(e){if(closed||ticket!==sequence)return;setMessage('โหลดภาพไม่สำเร็จ: '+(e.message||'กรุณาลองอีกครั้ง'));retry.hidden=false;}
+
+  }catch(e){originalReady=true;if(closed||ticket!==sequence)return;setMessage('โหลดภาพไม่สำเร็จ: '+(e.message||'กรุณาลองอีกครั้ง'));retry.hidden=false;}
  }
  async function loadThumbnails(){
   const generation=++thumbnailGeneration,buttons=[...modal.querySelectorAll('[data-viewer-index]')],list=[...items];let cursor=0,loaded=0,finished=0;
@@ -39,7 +43,7 @@ export function openPhotoViewer(product,{modal,openModal,modalHeader,photoUrl}){
    indicator.textContent='โหลดภาพย่อ '+loaded+'/'+list.length+' · '+Math.floor(100*loaded/Math.max(1,list.length))+'%'+(finished===list.length&&loaded<finished?' · บางรูปยังโหลดไม่ได้':'');
   }
   update();
-  async function worker(){while(cursor<list.length&&!closed&&generation===thumbnailGeneration){const i=cursor++,button=buttons[i],thumb=button.querySelector('img'),placeholder=button.querySelector('.viewer-thumb>span');try{const url=await photoUrl(list[i].photo);if(closed||generation!==thumbnailGeneration||!button.isConnected)return;if(url){thumb.onload=()=>{if(button.isConnected){thumb.hidden=false;placeholder.hidden=true;thumb.onload=null;thumb.onerror=null;loaded++;finished++;update();}};thumb.onerror=()=>{placeholder.textContent='โหลดไม่ได้';thumb.hidden=true;finished++;update();};thumb.src=url;}else{finished++;update();placeholder.textContent='รอ Google';button.title='เชื่อมต่อ Google เพื่อโหลดภาพ';}}catch{if(button.isConnected){finished++;update();placeholder.textContent='โหลดไม่ได้';button.title='โหลดภาพไม่สำเร็จ กรุณาลองใหม่';}}}}
+  async function worker(){while(cursor<list.length&&!closed&&generation===thumbnailGeneration){const i=cursor++,button=buttons[i],thumb=button.querySelector('img'),placeholder=button.querySelector('.viewer-thumb>span');try{const url=await thumbnailUrl(list[i].photo,()=>!closed&&generation===thumbnailGeneration&&button.isConnected);if(closed||generation!==thumbnailGeneration||!button.isConnected)return;if(url){thumb.onload=()=>{if(button.isConnected){thumb.hidden=false;placeholder.hidden=true;thumb.onload=null;thumb.onerror=null;loaded++;finished++;update();}};thumb.onerror=()=>{placeholder.textContent='โหลดไม่ได้';thumb.hidden=true;finished++;update();};thumb.src=url;}else{finished++;update();placeholder.textContent='รอ Google';button.title='เชื่อมต่อ Google เพื่อโหลดภาพ';}}catch{if(button.isConnected){finished++;update();placeholder.textContent='โหลดไม่ได้';button.title='โหลดภาพไม่สำเร็จ กรุณาลองใหม่';}}}}
   await Promise.all(Array.from({length:Math.min(3,list.length)},worker));
  }
  function thumbnails(){

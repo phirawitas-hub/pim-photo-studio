@@ -8,9 +8,9 @@ import {initTheme} from './theme.mjs?v=20261103clean';
 initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs?v=20261120jobclose';
-import * as db from './store.mjs?v=20261120locations';
-import * as cloud from './google.mjs?v=20261120progress';
-import {openPhotoViewer} from './viewer.mjs?v=20261120progress';
+import * as db from './store.mjs?v=20261120speed';
+import * as cloud from './google.mjs?v=20261120speed';
+import {openPhotoViewer} from './viewer.mjs?v=20261120speed';
 cloud.warmup();
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
 const paths={grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',camera:'M4 6h4l2-3h5l2 3h3v15H4z M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',import:'M12 3v12 m-5-5 5 5 5-5 M4 15v6h16v-6',export:'M12 16V3 m-5 5 5-5 5 5 M4 15v6h16v-6',settings:'M9 3h6l1 4 4 1v7l-4 1-1 4H9l-1-4-4-1V8l4-1z M15 11.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0',menu:'M5 6h14 M5 12h10 M5 18h14',search:'M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0 M15 15l6 6',check:'m5 12 4 4L19 6',clock:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 7v5l3 2',refresh:'M20 7a9 9 0 1 0 1 8 M20 3v5h-5',arrow:'M5 12h14 m-5-5 5 5-5 5',back:'M19 12H5 m5-5-5 5 5 5',image:'M3 3h18v18H3z m0 14 6-6 4 4 3-3 5 5 M15 7h.01',cloud:'M7 19H5a4 4 0 0 1-1-8 7 7 0 0 1 14-2 5 5 0 0 1 1 10h-2 M12 21V11 m-4 4 4-4 4 4',file:'M6 2h8l5 5v15H6z M14 2v6h5 M9 12h7 M9 16h7',close:'m6 6 12 12 M6 18 18 6',link:'m10 13 4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M13 7l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0',info:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 11v6 M12 7v.01',box:'m12 3 9 5v9l-9 5-9-5V8z M3 8l9 5 9-5 M12 13v9 M7 5l10 6'};
@@ -131,15 +131,16 @@ function bindJobClose(container){
   });
  });
 }
+function coverPhoto(product){return product.photos?.top?.[0]||ANGLES.map(a=>product.photos?.[a.id]?.[0]).find(Boolean);}
 function renderTable(){
  const match=filteredProducts();
  const summary=$('#filter-summary');if(summary)summary.textContent=(batchFilter||stockStatusFilter||query||importFrom||importTo||filter!=='all')?'กำลังใช้ตัวกรอง · แสดง '+match.length+' จากทั้งหมด '+products.length+' รายการ — กดล้างตัวกรองเพื่อดูทุกงาน':'แสดงงานจากทุกไฟล์นำเข้า';
  const pages=Math.max(1,Math.ceil(match.length/10));page=Math.min(page,pages);const shown=match.slice((page-1)*10,page*10);
- $('#table-area').innerHTML=shown.length?`<div class="table-wrap"><table class="product-table"><thead><tr><th style="width:65px">NO.</th><th>ITEM CODE / PRODUCT</th><th>Location / สถานะสต็อก</th><th>ชื่อผู้ขอ / วัตถุประสงค์</th><th>ภาพถ่าย</th><th>สถานะ</th><th style="width:230px"></th></tr></thead><tbody>${shown.map((p,i)=>{const n=progress(p);return `<tr><td style="color:#a0acb7">${String((page-1)*10+i+1).padStart(2,'0')}</td><td><div class="product-cell"><div class="product-placeholder list-photo">${p.photos?.top?.[0]?`<img data-list-product="${p.id}" alt="Top view 1 · ${esc(p.code)}" loading="lazy">`:icon('box')}</div><div><a href="#product/${p.id}" class="code product-item-code">${String(p.code).trim().split(/\s+/).map(part=>'<span class="item-code-part">'+esc(part)+'</span>').join(' ')}</a><div class="product-name">${esc(p.name)}</div></div></div></td><td>${listMetadata(p)}</td><td><b class="product-requester">${esc(workspace.data.find(d=>d.id===p.id)?.requester||'—')}</b><div class="product-name product-purpose" title="${esc(p.purpose)}">${esc(p.purpose||'—')}</div></td><td><span class="progress-count">${n.required} / 7 มุม <span style="color:#a6b1b9">· ${n.total} รูป</span></span><div class="progress-track"><i style="width:${n.required/7*100}%"></i></div></td><td>${badge(p)}${p.dirty?'<div class="draft-indicator">ฉบับร่างในเครื่องนี้ · ยังไม่บันทึกลงชีต</div>':''}${p.remoteUpdate?'<div class="sync-conflict">ชีตมีข้อมูลชุดใหม่ <button class="small" data-cloud-view="'+p.id+'">ดูรูปจากชีต</button></div>':''}</td><td><div class="product-row-actions"><button class="small" data-view="${p.id}" ${n.total?'':'disabled'} aria-label="ดูรูป ${esc(p.code)}">${icon('image')}ดูรูป</button><button class="small row-pdf" data-product-pdf="${p.id}" ${n.total?'':'disabled'} aria-label="ดาวน์โหลด PDF ${esc(p.code)}">${icon('file')}ดาวน์โหลด PDF</button><button class="small" data-open="${p.id}">${icon('camera')}${p.closed?'รายละเอียด':n.total?'จัดการรูป':'เริ่มถ่าย'}</button>${jobCloseButton(p)}</div></td></tr>`;}).join('')}</tbody></table></div><div class="pagination"><span>แสดง ${(page-1)*10+1}–${Math.min(page*10,match.length)} จาก ${match.length.toLocaleString()} รายการ</span><div class="actions"><button id="prev" aria-label="หน้าก่อน" ${page===1?'disabled':''}>‹</button><span>${page} / ${pages}</span><button id="next" aria-label="หน้าถัดไป" ${page===pages?'disabled':''}>›</button></div></div>`:`<div class="empty"><div class="empty-illustration">${icon(products.length?'search':'camera')}</div><h3>${products.length?'ไม่พบสินค้าที่ค้นหา':'เริ่มต้นงานถ่ายรูปชุดแรกของคุณ'}</h3><p>${products.length?'ลองเปลี่ยนคำค้นหาหรือตัวกรอง':'นำเข้าไฟล์ Excel แบบฟอร์มขอรูปถ่ายสินค้า<br>แล้วเลือกสินค้าเพื่อถ่ายรูปให้ครบทั้ง 7 มุมที่จำเป็น'}</p><button id="empty-import" class="primary">${icon('import')}Import File</button>${!products.length?'<br><button class="ghost text-link" id="demo">ทดลองหน้าถ่ายรูปด้วยข้อมูลสมมติ →</button>':''}</div>`;
+ $('#table-area').innerHTML=shown.length?`<div class="table-wrap"><table class="product-table"><thead><tr><th style="width:65px">NO.</th><th>ITEM CODE / PRODUCT</th><th>Location / สถานะสต็อก</th><th>ชื่อผู้ขอ / วัตถุประสงค์</th><th>ภาพถ่าย</th><th>สถานะ</th><th style="width:230px"></th></tr></thead><tbody>${shown.map((p,i)=>{const n=progress(p);return `<tr><td style="color:#a0acb7">${String((page-1)*10+i+1).padStart(2,'0')}</td><td><div class="product-cell"><div class="product-placeholder list-photo">${coverPhoto(p)?`${icon('image')}<img data-list-product="${p.id}" alt="ภาพสินค้า · ${esc(p.code)}" loading="lazy">`:icon('box')}</div><div><a href="#product/${p.id}" class="code product-item-code">${String(p.code).trim().split(/\s+/).map(part=>'<span class="item-code-part">'+esc(part)+'</span>').join(' ')}</a><div class="product-name">${esc(p.name)}</div></div></div></td><td>${listMetadata(p)}</td><td><b class="product-requester">${esc(workspace.data.find(d=>d.id===p.id)?.requester||'—')}</b><div class="product-name product-purpose" title="${esc(p.purpose)}">${esc(p.purpose||'—')}</div></td><td><span class="progress-count">${n.required} / 7 มุม <span style="color:#a6b1b9">· ${n.total} รูป</span></span><div class="progress-track"><i style="width:${n.required/7*100}%"></i></div></td><td>${badge(p)}${p.dirty?'<div class="draft-indicator">ฉบับร่างในเครื่องนี้ · ยังไม่บันทึกลงชีต</div>':''}${p.remoteUpdate?'<div class="sync-conflict">ชีตมีข้อมูลชุดใหม่ <button class="small" data-cloud-view="'+p.id+'">ดูรูปจากชีต</button></div>':''}</td><td><div class="product-row-actions"><button class="small" data-view="${p.id}" ${n.total?'':'disabled'} aria-label="ดูรูป ${esc(p.code)}">${icon('image')}ดูรูป</button><button class="small row-pdf" data-product-pdf="${p.id}" ${n.total?'':'disabled'} aria-label="ดาวน์โหลด PDF ${esc(p.code)}">${icon('file')}ดาวน์โหลด PDF</button><button class="small" data-open="${p.id}">${icon('camera')}${p.closed?'รายละเอียด':n.total?'จัดการรูป':'เริ่มถ่าย'}</button>${jobCloseButton(p)}</div></td></tr>`;}).join('')}</tbody></table></div><div class="pagination"><span>แสดง ${(page-1)*10+1}–${Math.min(page*10,match.length)} จาก ${match.length.toLocaleString()} รายการ</span><div class="actions"><button id="prev" aria-label="หน้าก่อน" ${page===1?'disabled':''}>‹</button><span>${page} / ${pages}</span><button id="next" aria-label="หน้าถัดไป" ${page===pages?'disabled':''}>›</button></div></div>`:`<div class="empty"><div class="empty-illustration">${icon(products.length?'search':'camera')}</div><h3>${products.length?'ไม่พบสินค้าที่ค้นหา':'เริ่มต้นงานถ่ายรูปชุดแรกของคุณ'}</h3><p>${products.length?'ลองเปลี่ยนคำค้นหาหรือตัวกรอง':'นำเข้าไฟล์ Excel แบบฟอร์มขอรูปถ่ายสินค้า<br>แล้วเลือกสินค้าเพื่อถ่ายรูปให้ครบทั้ง 7 มุมที่จำเป็น'}</p><button id="empty-import" class="primary">${icon('import')}Import File</button>${!products.length?'<br><button class="ghost text-link" id="demo">ทดลองหน้าถ่ายรูปด้วยข้อมูลสมมติ →</button>':''}</div>`;
  $('#prev')?.addEventListener('click',()=>{page--;renderTable();});$('#next')?.addEventListener('click',()=>{page++;renderTable();});main.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>location.hash='product/'+b.dataset.open);$('#empty-import')?.addEventListener('click',openImport);$('#demo')?.addEventListener('click',()=>run(addDemo));
- main.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.view);if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl});});
+ main.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.view);if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl,thumbnailUrl});});
  main.querySelectorAll('#table-area tbody tr').forEach(row=>[...row.children].forEach((cell,i)=>cell.dataset.label=['ลำดับ','สินค้า','Location / สถานะสต็อก','ผู้ขอ / วัตถุประสงค์','ภาพถ่าย','สถานะ',''][i]));
- main.querySelectorAll('[data-cloud-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.cloudView)?.remoteUpdate;if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl});});
+ main.querySelectorAll('[data-cloud-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.cloudView)?.remoteUpdate;if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl,thumbnailUrl});});
  main.querySelectorAll('[data-product-pdf]').forEach(b=>b.onclick=()=>{if(working)return toast('กำลังสร้างไฟล์ กรุณารอสักครู่');const p=products.find(x=>x.id===b.dataset.productPdf);if(p){openReportPicker([p]);$('#make-pdf').click();}});
  bindJobClose(main);hydrateListPhotos();
 }
@@ -155,7 +156,7 @@ function renderDetail(){
  $('#product-pdf').onclick=()=>run(async()=>{await saveDraft();openReportPicker([current]);});$('#back').onclick=()=>location.hash='products';main.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>location.hash='product/'+p.id+'/'+b.dataset.section);if(p.closed){$('#detail-content').innerHTML='<section class="panel modal-body">'+badge(p)+' · ยกเว้นการถ่ายรูป '+jobCloseButton(p)+'</section>';bindJobClose($('#detail-content'));return;}if(section==='details')renderFields();else if(section==='history')renderHistory();else renderGallery();renderSaveBar();
 }
 function renderGallery(){
- $('#detail-content').innerHTML=`<section class="panel"><div class="panel-head"><div><h2>Gallery</h2><p class="subtext" style="margin-top:5px">เพิ่มภาพให้ชัดเจน ครบทุกมุมของสินค้า</p></div><small><span class="required">*</span> มุมบังคับ · อย่างน้อย 1 รูป</small></div><div class="panel-body"><div class="gallery">${ANGLES.map(a=>{const photos=current.photos?.[a.id]||[];return `<article class="angle-card ${photos.length?'done':''}"><div class="angle-heading"><div><b>${a.name}${a.required?'<span class="required">*</span>':''}</b><div style="font-size:10px;color:#91a0ad;margin-top:4px">${a.thai}</div></div><small>${photos.length} / 5 รูป</small></div><div class="photo-strip">${photos.length?photos.map((ph,idx)=>`<div class="photo-tile"><img data-photo="${ph.id}" data-fileid="${ph.fileId||''}" alt="${esc(a.name)} รูปที่ ${idx+1}"><button class="remove-photo" data-remove="${ph.id}" data-angle="${a.id}" aria-label="ลบ ${esc(a.name)} รูปที่ ${idx+1}">×</button><span class="slot">${idx+1} · ${size(ph.size||0)}</span></div>`).join(''):`<div class="photo-empty">${icon('image')}<span>ยังไม่มีภาพ${a.thai}<br>กดถ่ายรูปเพื่อเปิดกล้องอุปกรณ์</span></div>`}</div><div class="angle-actions"><button data-camera="${a.id}" ${photos.length>=5||!isMobileCameraDevice()?'disabled':''}>${icon('camera')}ถ่ายรูปด้วยกล้องอุปกรณ์</button></div></article>`;}).join('')}</div><div class="bottom-bar"><small>JPG, PNG, WebP · สูงสุด 20 MB ต่อรูป<br>ถ่ายแล้วเริ่มอัปโหลดเข้า Drive อัตโนมัติ</small><div class="actions"><span>${isMobileCameraDevice()?'ใช้กล้องโทรศัพท์หรือ iPad':'เปิดหน้านี้บนโทรศัพท์หรือ iPad เพื่อถ่ายรูป'}</span></div></div></div></section>`;
+ $('#detail-content').innerHTML=`<section class="panel"><div class="panel-head"><div><h2>Gallery</h2><p class="subtext" style="margin-top:5px">เพิ่มภาพให้ชัดเจน ครบทุกมุมของสินค้า</p></div><small><span class="required">*</span> มุมบังคับ · อย่างน้อย 1 รูป</small></div><div class="panel-body"><div class="gallery">${ANGLES.map(a=>{const photos=current.photos?.[a.id]||[];return `<article class="angle-card ${photos.length?'done':''}"><div class="angle-heading"><div><b>${a.name}${a.required?'<span class="required">*</span>':''}</b><div style="font-size:10px;color:#91a0ad;margin-top:4px">${a.thai}</div></div><small>${photos.length} / 5 รูป</small></div><div class="photo-strip">${photos.length?photos.map((ph,idx)=>`<div class="photo-tile">${icon('image')}<img data-photo="${ph.id}" data-fileid="${ph.fileId||''}" alt="${esc(a.name)} รูปที่ ${idx+1}"><button class="remove-photo" data-remove="${ph.id}" data-angle="${a.id}" aria-label="ลบ ${esc(a.name)} รูปที่ ${idx+1}">×</button><span class="slot">${idx+1} · ${size(ph.size||0)}</span></div>`).join(''):`<div class="photo-empty">${icon('image')}<span>ยังไม่มีภาพ${a.thai}<br>กดถ่ายรูปเพื่อเปิดกล้องอุปกรณ์</span></div>`}</div><div class="angle-actions"><button data-camera="${a.id}" ${photos.length>=5||!isMobileCameraDevice()?'disabled':''}>${icon('camera')}ถ่ายรูปด้วยกล้องอุปกรณ์</button></div></article>`;}).join('')}</div><div class="bottom-bar"><small>JPG, PNG, WebP · สูงสุด 20 MB ต่อรูป<br>ถ่ายแล้วเริ่มอัปโหลดเข้า Drive อัตโนมัติ</small><div class="actions"><span>${isMobileCameraDevice()?'ใช้กล้องโทรศัพท์หรือ iPad':'เปิดหน้านี้บนโทรศัพท์หรือ iPad เพื่อถ่ายรูป'}</span></div></div></div></section>`;
  main.querySelectorAll('[data-camera]').forEach(b=>b.onclick=()=>openCamera(b.dataset.camera));
  main.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>confirmRemove(b.dataset.angle,b.dataset.remove));
  hydrateImages();
@@ -172,7 +173,74 @@ async function readPhotoBlob(photo){
  if(!blob&&photo.fileId&&cloud.connected()){blob=await cloud.photoBlob(photo.fileId);try{await db.put('assets',{id:photo.id,blob,fileId:photo.fileId,cachedAt:stamp()});}catch{/* Viewing still works if device storage is full. */}}
  return blob;
 }
-function hydrateImages(){const images=main.querySelectorAll('img[data-photo]');trackPhotoProgress($('#detail-content'),images);images.forEach(async img=>{try{const url=await photoUrl({id:img.dataset.photo,fileId:img.dataset.fileid});if(url&&img.isConnected)img.src=url;else if(img.isConnected){img.alt='เชื่อมต่อ Google เพื่อดูภาพ';img.dispatchEvent(new Event('error'));}img.onclick=()=>{if(!url)return toast('เชื่อมต่อ Google เพื่อโหลดภาพ');openModal(modalHeader('ภาพถ่ายสินค้า')+`<div class="modal-body"><img class="lightbox" src="${url}" alt="ภาพถ่ายสินค้า"></div>`);};}catch{if(img.isConnected){img.alt='โหลดภาพไม่สำเร็จ';img.dispatchEvent(new Event('error'));}}});}
+// A thumbnail is a display derivative. The original remains in the photo asset slot for PDF and zoom.
+const thumbnailLoads=new Map(),thumbnailMemory=new Map(),thumbnailQueue=[];
+let thumbnailActive=0,thumbnailObserver;
+function pumpThumbnails(){
+ while(thumbnailActive<3&&thumbnailQueue.length){
+  const job=thumbnailQueue.shift();
+  if(!job.needed()){job.resolve(null);continue;}
+  thumbnailActive++;
+  Promise.resolve().then(job.load).then(job.resolve,job.reject).finally(()=>{thumbnailActive--;pumpThumbnails();});
+ }
+}
+async function localThumbnail(blob){
+ const image=new Image(),original=URL.createObjectURL(blob);
+ try{
+  image.src=original;await image.decode();
+  const scale=Math.min(1,256/Math.max(image.width,image.height)),canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));
+  canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
+  return canvas.toDataURL('image/webp',0.82);
+ }finally{URL.revokeObjectURL(original);}
+}
+function thumbnailUrl(photo,needed=()=>true){
+ const key='thumb256:'+(photo.fileId||photo.id);
+ if(thumbnailMemory.has(key))return Promise.resolve(thumbnailMemory.get(key));
+ const existing=thumbnailLoads.get(key);if(existing){existing.users.push(needed);return existing.promise;}
+ const users=[needed];
+ async function load(){
+  let url=(await db.get('assets',key))?.url;
+  if(!url){
+   let blob=(await db.get('assets',photo.id))?.blob;
+   if(!blob&&photo.fileId&&cloud.connected())blob=await cloud.photoBlob(photo.fileId,true);
+   if(!blob)return null;
+   url=await localThumbnail(blob);
+   try{await db.put('assets',{id:key,url});}catch{/* Still display when storage is full. */}
+  }
+  if(thumbnailMemory.size>=96)thumbnailMemory.delete(thumbnailMemory.keys().next().value);
+  thumbnailMemory.set(key,url);return url;
+ }
+ const promise=new Promise((resolve,reject)=>{thumbnailQueue.push({load,resolve,reject,needed:()=>users.some(fn=>fn())});pumpThumbnails();}).finally(()=>thumbnailLoads.delete(key));
+ thumbnailLoads.set(key,{promise,users});return promise;
+}
+function scheduleThumbnails(images,lookup){
+ thumbnailObserver?.disconnect();
+ const load=async img=>{
+  const photo=lookup(img);if(!photo||!img.isConnected)return;
+  try{
+   const url=await thumbnailUrl(photo,()=>img.isConnected);
+   if(!img.isConnected)return;
+   if(url){img.src=url;return;}
+  }catch{/* Show the placeholder and keep the original accessible. */}
+  if(img.isConnected){img.title='ภาพย่อยังไม่พร้อม · เปิดดูรูปต้นฉบับได้';img.dispatchEvent(new Event('error'));}
+ };
+ if(!('IntersectionObserver' in window)){images.forEach(load);return;}
+ const observer=new IntersectionObserver(entries=>{
+  for(const entry of entries)if(entry.isIntersecting){observer.unobserve(entry.target);load(entry.target);}
+ },{rootMargin:'120px'});
+ thumbnailObserver=observer;images.forEach(img=>observer.observe(img));
+}
+function hydrateImages(){
+ const images=main.querySelectorAll('img[data-photo]'),lookup=img=>({id:img.dataset.photo,fileId:img.dataset.fileid});
+ trackPhotoProgress($('#detail-content'),images);scheduleThumbnails(images,lookup);
+ for(const img of images)img.onclick=()=>run(async()=>{
+  const url=await photoUrl(lookup(img));if(!img.isConnected)return;
+  if(!url)return toast('เชื่อมต่อ Google เพื่อโหลดภาพ');
+  openModal(modalHeader('ภาพถ่ายสินค้า')+`<div class="modal-body"><img class="lightbox" src="${url}" alt="ภาพถ่ายสินค้า"></div>`);
+ });
+}
+
 function currentPhotographer(p=current){return String(settings.photographer??p?.fields?.photographer??'').trim();}
 function assignPhotographer(p,name){p.fields??={};if(p.fields.photographer!==name){p.fields.photographer=name;p.dirty=true;p.pendingRevision=null;}}
 async function changePhotographer(p,value){const name=String(value||'').trim();settings.photographer=name;assignPhotographer(p,name);await db.put('settings',settings);p.updatedAt=stamp();await db.put('products',p);}
@@ -325,39 +393,60 @@ const pullCloud=singleFlight(async()=>{
   if(!cloud.connected())await cloud.connect(settings);
   // Refresh is read-only: a failed pending import must not block the team's updates.
   setSyncProgress(15,'กำลังอ่านชีต');
-  let fresh=await cloud.snapshot();
+  const bases=products.filter(p=>p.dirty&&p.baseRevision).map(p=>p.baseRevision);
+  let fresh=await cloud.snapshot(bases);
   setSyncProgress(55,'กำลังเทียบรายการสินค้า');
   let rows=await cloud.loadProducts(fresh);
   await reloadLocal();
-  if(!pullCloud.skipSplit&&typeof cloud.splitPendingStock==='function'&&fresh.stock?.rows?.length&&!fresh.stock.warnings?.length){
+  // New clients can display jobs before the separate live stock read for legacy rows.
+  const needsLiveStock=!!fresh.legacyCodes?.length;
+  if(needsLiveStock)fresh.stock=workspace.stock||{rows:[]};
+  if(!needsLiveStock&&await splitPending(rows,fresh.stock)){
+   fresh=await cloud.snapshot(bases);rows=await cloud.loadProducts(fresh);
+  }
+  async function commitRows(){
+   for(const entry of fresh.deletions||[])if(batches.some(b=>b.id===entry.id)){await db.deleteBatch(entry.id);if(current?.importId===entry.id){current=null;location.hash='imports';toast('งานนี้ถูกลบจากชีตแล้ว');}}
+   for(const r of fresh.imports){const old=batches.find(b=>b.id===r[0]);if(old?.synced&&old.name===r[1]&&old.createdAt===r[2]&&old.driveId===r[3]&&old.count===Number(r[5]))continue;await db.put('imports',{...old,id:r[0],name:r[1],createdAt:r[2],driveId:r[3],count:Number(r[5]),synced:true,workbook:old?.workbook||{sheets:[]}});}
+   setSyncProgress(80,'กำลังบันทึกข้อมูลล่าสุดในเครื่อง');
+   const updated=await db.mergeCloudProducts(rows,(local,remote)=>reconcileProduct(local,remote,fresh.revisions),current?.id);
+   await db.put('settings',{id:'workspace-cache',options:fresh.options,data:fresh.data,stock:fresh.stock,at:fresh.at});
+   if(fresh.branding&&(!fresh.partsChanged||fresh.partsChanged.includes('branding'))){await db.put('settings',{id:'branding',...fresh.branding});brand=fresh.branding;applyBranding();}
+   workspace=fresh;lastSync=fresh.at;await reloadLocal();
+   syncResult={total:rows.length,updated,drafts:products.filter(p=>p.dirty).length,conflicts:products.filter(p=>p.remoteUpdate).length};
+   if(!current&&!modal.open&&(updated||!fresh.partsChanged||fresh.partsChanged.length)){if($('#table-area'))refreshProductView();else if(!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))await route();}
+  }
+  await commitRows();
+  if(needsLiveStock){
+   setSyncProgress(90,'แสดงรายการแล้ว · กำลังตรวจ Location จากสต็อก');
+   const stock=await cloud.legacyStock(fresh.legacyCodes);
+   if(await splitPending(rows,stock)){
+    fresh=await cloud.snapshot(bases);rows=await cloud.loadProducts(fresh);
+    fresh.stock=stock;await commitRows();
+   }else{
+    const stockChanged=JSON.stringify(fresh.stock?.rows)!==JSON.stringify(stock.rows)||JSON.stringify(fresh.stock?.warnings)!==JSON.stringify(stock.warnings);
+    fresh.stock=stock;workspace=fresh;
+    await db.put('settings',{id:'workspace-cache',options:fresh.options,data:fresh.data,stock,at:fresh.at});
+    if(!current&&!modal.open&&$('#table-area')&&stockChanged)refreshProductView();
+   }
+  }
+  return syncResult;
+ }catch(e){syncError=e.message||String(e);throw e;}
+ finally{syncing=false;updateSyncStatus();updateConnection();}
+});
+async function splitPending(rows,stock){
+ if(pullCloud.skipSplit||typeof cloud.splitPendingStock!=='function'||!stock?.rows?.length||stock.warnings?.length)return false;
    const norm=v=>String(v||'').normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase();
-   const stockCodes=new Set(fresh.stock.rows.map(s=>norm(s.code)));
+   const stockCodes=new Set(stock.rows.map(s=>norm(s.code)));
    const hasPendingUnsplit=rows.some(r=>{
     if(r.closed||r.stockCompany||r.stockLocation||r.stockStatus||r.baseRevision||Object.values(r.photos||{}).some(a=>a.length))return false;
     const local=products.find(x=>x.id===r.id);
     if(local?.dirty&&Object.values(local.photos||{}).some(a=>a.length))return false;
     return stockCodes.has(norm(r.code));
    });
-   if(hasPendingUnsplit){
-    try{
-     const splitRes=await cloud.splitPendingStock();
-     if(splitRes&&(splitRes.split||splitRes.created)){fresh=await cloud.snapshot();rows=await cloud.loadProducts(fresh);}
-    }catch(e){if(/ไม่รองรับคำสั่งนี้/.test(e.message||''))pullCloud.skipSplit=true;}
-   }
-  }
-  for(const entry of fresh.deletions||[])if(batches.some(b=>b.id===entry.id)){await db.deleteBatch(entry.id);if(current?.importId===entry.id){current=null;location.hash='imports';toast('งานนี้ถูกลบจากชีตแล้ว');}}
-  for(const r of fresh.imports){const old=batches.find(b=>b.id===r[0]);await db.put('imports',{...old,id:r[0],name:r[1],createdAt:r[2],driveId:r[3],count:Number(r[5]),synced:true,workbook:old?.workbook||{sheets:[]}});}
-  setSyncProgress(80,'กำลังบันทึกข้อมูลล่าสุดในเครื่อง');
-  const updated=await db.mergeCloudProducts(rows,(local,remote)=>reconcileProduct(local,remote,fresh.revisions),current?.id);
-  await db.put('settings',{id:'workspace-cache',options:fresh.options,data:fresh.data,stock:fresh.stock,at:fresh.at});
-  if(fresh.branding){await db.put('settings',{id:'branding',...fresh.branding});brand=fresh.branding;applyBranding();}
-  workspace=fresh;lastSync=fresh.at;await reloadLocal();
-  syncResult={total:rows.length,updated,drafts:products.filter(p=>p.dirty).length,conflicts:products.filter(p=>p.remoteUpdate).length};
-  if(!current&&!modal.open){if($('#table-area'))refreshProductView();else if(!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))await route();}
-  return syncResult;
- }catch(e){syncError=e.message||String(e);throw e;}
- finally{syncing=false;updateSyncStatus();updateConnection();}
-});
+ if(!hasPendingUnsplit)return false;
+ try{const result=await cloud.splitPendingStock();return !!(result?.split||result?.created);}
+ catch(error){if(/ไม่รองรับคำสั่งนี้/.test(error.message||'')){pullCloud.skipSplit=true;return false;}throw error;}
+}
 function setSyncProgress(percent,message){
  pullCloud.percent=percent;pullCloud.message=message;
  for(const listener of pullCloud.listeners||[])listener(message,percent);
@@ -650,16 +739,8 @@ async function hydrateListPhotos(){
  const table=$('#table-area');
  const images=[...table.querySelectorAll('[data-list-product]')];
  trackPhotoProgress(table,images);
- for(const img of images){
-  if(!img.isConnected)return;
-  const p=products.find(product=>product.id===img.dataset.listProduct),photo=p?.photos?.top?.[0];
-  try{
-   const url=photo&&await photoUrl(photo);
-   if(!img.isConnected)return;
-   if(url)img.src=url;
-   else{img.alt='รอรูปจาก Google';img.dispatchEvent(new Event('error'));}
-  }catch{if(img.isConnected){img.alt='โหลดภาพไม่สำเร็จ';img.dispatchEvent(new Event('error'));}}
- }
+ const byId=new Map(products.map(p=>[p.id,p]));
+ scheduleThumbnails(images,img=>coverPhoto(byId.get(img.dataset.listProduct)));
 }
 
 function renderSaveBar(){
@@ -696,7 +777,7 @@ async function openDeleteImport(batchId){
  try{const preview=await cloud.deletePreview(batchId,batch.name);preview.products=Math.max(preview.products,products.filter(p=>p.importId===batchId).length);if(!modal.open)return;
  openModal(modalHeader('ลบไฟล์นำเข้าและข้อมูลทั้งหมด')+'<div class="modal-body"><p><b>'+esc(batch.name)+'</b></p><div class="notice">ลบสินค้า '+preview.products+' รายการออกจากแอปและชีต รวมประวัติ Revision และข้อมูลต้นฉบับของไฟล์นี้<br>ย้ายไฟล์ใน Drive '+preview.files+' ไฟล์ไปถังขยะ'+(preview.shared?'<br>คงรูปที่งานอื่นยังใช้อยู่ '+preview.shared+' ไฟล์ เพื่อไม่ให้งานอื่นเสียหาย':'')+'</div><p class="help">การเปลี่ยนแปลงมีผลทุกเครื่องเมื่อซิงก์ ข้อมูลในชีตใช้ประวัติเวอร์ชันเพื่อกู้คืน ส่วนไฟล์ Drive อยู่ในถังขยะ</p><label class="field">พิมพ์ชื่อไฟล์ด้านบนเพื่อยืนยัน<input id="delete-confirm-name" autocomplete="off"></label><div class="actions" style="margin-top:20px"><button id="cancel-batch-delete">ยกเลิก</button><button id="confirm-batch-delete" class="danger" disabled>ยืนยันลบทั้งไฟล์</button></div><p id="delete-error" role="alert"></p></div>');
  $('#cancel-batch-delete').onclick=closeModal;$('#delete-confirm-name').oninput=()=>$('#confirm-batch-delete').disabled=$('#delete-confirm-name').value!==batch.name;
- $('#confirm-batch-delete').onclick=()=>run(async()=>{const button=$('#confirm-batch-delete');button.disabled=true;try{busy('กำลังลบข้อมูลจากชีตและย้ายไฟล์ Drive ไปถังขยะ');await cloud.deleteImport(batchId,$('#delete-confirm-name').value,busy);busy('ลบจาก Google แล้ว · กำลังลบข้อมูลในเครื่อง',90);await db.deleteBatch(batchId);busy('กำลังตรวจรายการหลังลบ',95);for(const url of objectUrls.values())URL.revokeObjectURL(url);objectUrls.clear();batchFilter='';page=1;closeModal();await reloadLocal();await refreshCloud(true);location.hash='imports';await route();toast('ลบไฟล์นำเข้าและข้อมูลที่เกี่ยวข้องแล้ว');}catch(e){if($('#delete-error'))$('#delete-error').textContent='ยังลบไม่ครบ: '+e.message+' กรุณาลองยืนยันอีกครั้งเพื่อทำต่อ';button.disabled=false;throw e;}});
+ $('#confirm-batch-delete').onclick=()=>run(async()=>{const button=$('#confirm-batch-delete');button.disabled=true;try{busy('กำลังลบข้อมูลจากชีตและย้ายไฟล์ Drive ไปถังขยะ');await cloud.deleteImport(batchId,$('#delete-confirm-name').value,busy);busy('ลบจาก Google แล้ว · กำลังลบข้อมูลในเครื่อง',90);await db.deleteBatch(batchId);busy('กำลังตรวจรายการหลังลบ',95);for(const url of objectUrls.values())URL.revokeObjectURL(url);objectUrls.clear();thumbnailMemory.clear();batchFilter='';page=1;closeModal();await reloadLocal();await refreshCloud(true);location.hash='imports';await route();toast('ลบไฟล์นำเข้าและข้อมูลที่เกี่ยวข้องแล้ว');}catch(e){if($('#delete-error'))$('#delete-error').textContent='ยังลบไม่ครบ: '+e.message+' กรุณาลองยืนยันอีกครั้งเพื่อทำต่อ';button.disabled=false;throw e;}});
  }catch(e){closeModal();toast(e.message,true);}
 }
 

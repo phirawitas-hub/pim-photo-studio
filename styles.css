@@ -299,3 +299,8 @@ dialog:has(.import-review) {
 #busy-percent{font-variant-numeric:tabular-nums;color:var(--teal-dark)}
 #busy[hidden]{display:none}
 .photo-load-status,#viewer-load-progress{display:block;padding:6px 16px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+.list-photo,.photo-tile{position:relative}
+.list-photo>.icon,.photo-tile>.icon{position:absolute;inset:0;margin:auto;color:var(--muted);pointer-events:none}
+img[data-list-product],img[data-photo]{position:relative}
+img[data-list-product]:not([src]),img[data-photo]:not([src]){opacity:0}

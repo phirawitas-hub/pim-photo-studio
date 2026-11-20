@@ -455,3 +455,34 @@ test('ปิดและเปิดงานเฉพาะ Location ซ้ำ�
  ctx.setJobClosed_({},{...change,closed:false});ctx.setJobClosed_({},{...change,closed:false});
  assert.equal(closed.length,0);assert.equal(rows.length,2);
 });
+
+test('compact sync preserves selected revisions, draft bases and head while omitting unchanged tables',()=>{
+ const products=[['p','SKU','name','','batch']],revisions=['base','middle','selected','head'].map((id,i)=>[id,'p',String(i),'','{}','{"top":[{"id":"photo"}]}']);
+ const tables={PIM_Products:products,PIM_Revisions:revisions,PIM_Selections:[['p','selected']],PIM_Imports:[['batch']]};
+ const ctx=vm.createContext({Utilities:{DigestAlgorithm:{},Charset:{},computeDigest:(_,s)=>s,base64Encode:s=>s}});
+ vm.runInContext(backendCode,ctx);
+ ctx.table_=(_,name)=>tables[name]||[];
+ const ss={getSheetByName:name=>{assert.equal(name,'Data');return null;}};
+ const first=ctx.listSnapshot_(ss,{bases:['base']});
+ assert.deepEqual(Array.from(first.parts.revisions,r=>r.length),[6,3,6,3]);
+ assert.deepEqual(Array.from(first.parts.legacyCodes),['SKU']);
+ const next=ctx.listSnapshot_(ss,{bases:['base'],tags:first.tags});
+ assert.deepEqual(Object.keys(next.parts),[]);
+ tables.PIM_ClosedJobs=[['p','now']];
+ assert.deepEqual(Object.keys(ctx.listSnapshot_(ss,{bases:['base'],tags:first.tags}).parts),['closedJobs']);
+});
+test('list data reads only small ranges under the four relevant headers',()=>{
+ const ctx=vm.createContext({});vm.runInContext(backendCode,ctx);
+ const headers=Array(210).fill('');headers[0]='วันที่';headers[1]='ชื่อผู้ขอ';headers[4]='รหัสสินค้า';headers[208]='PIM Product ID';
+ const values=headers.map((_,i)=>String(i));const sheet=mockSheet([headers,values]);
+ const get=sheet.getRange;sheet.getRange=(row,col,n,m)=>{if(row>1)assert.ok(m<=5);return get(row,col,n,m);};
+ const result=ctx.listData_({getSheetByName:()=>sheet})[0];
+ assert.deepEqual({...result},{id:'208',requestDate:'0',requester:'1',code:'4'});
+});
+test('Drive thumbnail reads validate the photo registry and never fetch the original as a fallback',()=>{
+ let originals=0;const file={getThumbnail:()=>null,getBlob:()=>{originals++;return {getContentType:()=>'image/jpeg',getBytes:()=>[1]};}};
+ const ctx=vm.createContext({DriveApp:{getFileById:id=>{assert.equal(id,'owned');return file;}},Utilities:{base64Encode:()=>'AQ=='}});
+ vm.runInContext(backendCode,ctx);ctx.table_=()=>[['k','owned','photo']];
+ assert.throws(()=>ctx.photo_({},'outside',true));assert.equal(ctx.photo_({},'owned',true),null);assert.equal(originals,0);
+ assert.equal(ctx.photo_({},'owned',false).base64,'AQ==');assert.equal(originals,1);
+});

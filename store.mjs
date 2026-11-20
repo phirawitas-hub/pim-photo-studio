@@ -7,7 +7,7 @@ export const remove=(name,id)=>action(name,'readwrite',s=>s.delete(id));
 export async function commitImport(batch,products){const db=await ready;return new Promise((resolve,reject)=>{const tx=db.transaction(['imports','products'],'readwrite');tx.objectStore('imports').put(batch);for(const p of products)tx.objectStore('products').put(p);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});}
 
 export async function deleteBatch(batchId){
- const connection=await ready;return new Promise((resolve,reject)=>{const tx=connection.transaction(['imports','products','assets'],'readwrite'),store=tx.objectStore('products'),read=store.getAll();read.onsuccess=()=>{const rows=read.result,keep=new Set(rows.filter(p=>p.importId!==batchId).flatMap(p=>Object.values(p.photos||{}).flat().map(ph=>ph.id)));for(const p of rows.filter(p=>p.importId===batchId)){for(const ph of Object.values(p.photos||{}).flat())if(!keep.has(ph.id))tx.objectStore('assets').delete(ph.id);store.delete(p.id);}tx.objectStore('imports').delete(batchId);};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
+ const connection=await ready;return new Promise((resolve,reject)=>{const tx=connection.transaction(['imports','products','assets'],'readwrite'),store=tx.objectStore('products'),read=store.getAll();read.onsuccess=()=>{const rows=read.result,keep=new Set(rows.filter(p=>p.importId!==batchId).flatMap(p=>Object.values(p.photos||{}).flat().map(ph=>ph.id)));for(const p of rows.filter(p=>p.importId===batchId)){for(const ph of Object.values(p.photos||{}).flat())if(!keep.has(ph.id)){const assets=tx.objectStore('assets');assets.delete(ph.id);assets.delete('thumb256:'+ph.id);if(ph.fileId)assets.delete('thumb256:'+ph.fileId);}store.delete(p.id);}tx.objectStore('imports').delete(batchId);};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);});
 }
 
 // Read and merge in one transaction so a draft edited during the network request wins.
@@ -25,8 +25,8 @@ export async function mergeCloudProducts(rows,merge,preserveId){
      const local=localMap.get(remote.id);
      if(local&&local.id===preserveId)continue;
      const result=merge(local,remote);
-     if(JSON.stringify(local)!==JSON.stringify(result))updated++;
-     store.put(result);
+     if(JSON.stringify(local)===JSON.stringify(result))continue;
+     store.put(result);updated++;
     }
    }catch(e){reject(e);tx.abort();}
   };

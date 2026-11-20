@@ -65,6 +65,7 @@ export async function saveProduct(p,onProgress=()=>{}){
  p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.sheetId=config.sheetId;p.syncedAt=r.at;if(r.stockSnapshot){p.stockSnapshot=r.stockSnapshot;p.stockQty=r.stockSnapshot.qty;}await db.put('products',p);
 }
 export async function itemHistory(code,scope){return rpc('itemHistory',scope?{code,productId:scope.id||'',stockCompany:scope.stockCompany||'',stockLocation:scope.stockLocation||'',stockStatus:scope.stockStatus||''}:{code});}
+export const legacyStock=codes=>rpc('stock',{codes});
 export async function stock(code){return rpc('stock',{code});}
 export async function validateItems(codes){
  if(!codes.length||codes.length>5000)throw Error('นำเข้าได้ครั้งละไม่เกิน 5,000 Item code');
@@ -72,18 +73,40 @@ export async function validateItems(codes){
 }
 export async function selectRevision(p,revisionId){assertSheet(p);const r=await rpc('selectRevision',{productId:p.id,revisionId});const history=await itemHistory(p.code,p);applyRevision(p,r.revision,history);p.syncedAt=r.at;await db.put('products',p);return p;}
 export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.stockSnapshot=meta.stockSnapshot||null;if(p.stockSnapshot&&!p.stockCompany&&!p.stockLocation&&!p.stockStatus){p.stockCompany=p.stockSnapshot.company||'';p.stockLocation=p.stockSnapshot.location||'';p.stockStatus=normalizeInventoryStatus(p.stockSnapshot.status||'');p.stockQty=p.stockSnapshot.qty??'';}p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
-export async function loadProducts(snapshot){
- const data=snapshot||await rpc('snapshot');if(!['imports','products','revisions','selections'].every(k=>Array.isArray(data?.[k])))throw Error('ข้อมูลจากชีตไม่ครบ กรุณารีเฟรชอีกครั้ง');const completed=new Set(data.imports.map(r=>r[0])),rows=data.products.filter(r=>completed.has(r[4])),revisions=data.revisions,selections=data.selections;
+export async function loadProducts(fresh){
+ const data=fresh||await snapshot();if(!['imports','products','revisions','selections'].every(k=>Array.isArray(data?.[k])))throw Error('ข้อมูลจากชีตไม่ครบ กรุณารีเฟรชอีกครั้ง');const completed=new Set(data.imports.map(r=>r[0])),rows=data.products.filter(r=>completed.has(r[4])),revisions=data.revisions,selections=data.selections;
  const closedIds=new Set((data.closedJobs||[]).map(row=>row[0]));
  const mapped=rows.map(r=>({id:r[0],closed:closedIds.has(r[0]),code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7],stockCompany:String(r[8]||'').trim().toUpperCase(),stockLocation:String(r[9]||'').trim(),stockStatus:normalizeInventoryStatus(r[10]||''),stockQty:r[11]??''}));
- return mapped.map(p=>{const scope=productScopeKey(p),ids=new Set(mapped.filter(x=>productScopeKey(x)===scope).map(x=>x.id)),history=revisions.filter(x=>ids.has(x[1])),selection=selections.filter(x=>x[0]===p.id).at(-1),rev=selection?history.find(x=>x[0]===selection[1]):history.filter(x=>x[1]===p.id).at(-1);applyRevision(p,rev,history);p.syncedAt=selection?.[2]||p.syncedAt;p.importSynced=true;return p;});
+ const scopeById=new Map(mapped.map(p=>[p.id,productScopeKey(p)])),historyByScope=new Map(),latest=new Map(),byId=new Map(),selected=new Map(selections.map(r=>[r[0],r]));
+ for(const row of revisions){
+  const scope=scopeById.get(row[1]);if(!scope)continue;
+  if(!historyByScope.has(scope))historyByScope.set(scope,[]);
+  historyByScope.get(scope).push(row);latest.set(row[1],row);byId.set(row[0],row);
+ }
+ return mapped.map(p=>{
+  const scope=scopeById.get(p.id),history=historyByScope.get(scope)||[],selection=selected.get(p.id);
+  const revision=selection?byId.get(selection[1]):latest.get(p.id);
+  applyRevision(p,revision&&scopeById.get(revision[1])===scope?revision:null,history);
+  p.syncedAt=selection?.[2]||p.syncedAt;p.importSynced=true;return p;
+ });
 }
-export async function photoBlob(fileId){const r=await rpc('photo',{fileId});return new Blob([Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0))],{type:r.mime});}
-
+export async function photoBlob(fileId,thumbnail=false){
+ const r=await rpc('photo',{fileId,thumbnail});
+ if(!r)return null;
+ return new Blob([Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0))],{type:r.mime});
+}
 export const workspace=()=>rpc('workspace');
 export const changeOption=(kind,value,operation)=>rpc('option',{kind,value,operation});
 
-export const snapshot=()=>rpc('snapshot');
+let snapshotCache=null;
+export async function snapshot(bases=[]){
+ const sheet=config?.sheetId,previous=snapshotCache?.sheet===sheet?snapshotCache:null;
+ const result=await rpc('snapshot',{compact:true,bases,tags:previous?.tags||{}});
+ if(!result.parts)return result;
+ const values={...previous?.values,...result.parts};
+ snapshotCache={sheet,values,tags:result.tags};
+ return {...values,partsChanged:Object.keys(result.parts),at:result.at};
+}
 export const splitPendingStock=()=>rpc('splitPendingStock');
 export const setJobClosed=payload=>rpc('setJobClosed',payload);
 export const updateJobLocations=payload=>rpc('updateJobLocations',payload);

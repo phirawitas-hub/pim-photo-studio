@@ -13,8 +13,23 @@ export async function deleteBatch(batchId){
 // Read and merge in one transaction so a draft edited during the network request wins.
 export async function mergeCloudProducts(rows,merge,preserveId){
  const connection=await ready;return new Promise((resolve,reject)=>{
-  const tx=connection.transaction('products','readwrite'),store=tx.objectStore('products');let updated=0;
-  for(const remote of rows){const request=store.get(remote.id);request.onsuccess=()=>{try{const local=request.result;if(local&&local.id===preserveId)return;const result=merge(local,remote);if(JSON.stringify(local)!==JSON.stringify(result))updated++;store.put(result);}catch(e){reject(e);tx.abort();}};}
+  const tx=connection.transaction('products','readwrite'),store=tx.objectStore('products'),remoteIds=new Set(rows.map(r=>r.id));let updated=0;
+  const allReq=store.getAll();
+  allReq.onsuccess=()=>{
+   try{
+    const localMap=new Map(allReq.result.map(x=>[x.id,x]));
+    for(const local of allReq.result){
+     if(local.importSynced&&!local.demo&&!local.dirty&&local.id!==preserveId&&!remoteIds.has(local.id)){store.delete(local.id);updated++;}
+    }
+    for(const remote of rows){
+     const local=localMap.get(remote.id);
+     if(local&&local.id===preserveId)continue;
+     const result=merge(local,remote);
+     if(JSON.stringify(local)!==JSON.stringify(result))updated++;
+     store.put(result);
+    }
+   }catch(e){reject(e);tx.abort();}
+  };
   tx.oncomplete=()=>resolve(updated);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('บันทึกข้อมูลที่รีเฟรชไม่สำเร็จ'));
  });
 }

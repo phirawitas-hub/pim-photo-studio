@@ -103,7 +103,8 @@ Tests แบบ mock ไม่แทนการตรวจ Google จริง
 - อ่าน Stock_VPT_VSP แบบ read-only: Company, Location, Item Code, Inventory Status, On Hand Qty (รวมชื่อหัว SUM ของ On Hand Qty); Categories เป็นคอลัมน์เสริม ไม่จำเป็นต้องมี
 - หากพบชีตรวม จะอ่านชีตรวมเท่านั้นเพื่อไม่ให้ข้อมูลซ้ำ หากไม่มีจึงรองรับ Stock_VP / Stock_VSP เดิม
 - Match รหัสเต็ม ปรับเฉพาะตัวพิมพ์และช่องว่าง ไม่ตัด suffix หรือศูนย์นำหน้า แสดงแยกทุก Location / สถานะ / บริษัท และปรับตัวพิมพ์ Inventory Status ให้สม่ำเสมอ (เช่น Good, Damage, Incomplete, Disposal, QC, Hold, Borrow)
-- ตอนนำเข้า ระบบแตกงานถ่ายอัตโนมัติตามทุกแถวสต็อก (`Company + Location + Inventory Status`) เช่น Item เดียวที่มี 4 แถวสต็อกจะแตกเป็น 4 งานถ่าย (ยังบังคับ 7 มุมต่อชุด และออก PDF แยก 1 ไฟล์ต่อ 1 ชุด)
+- ตอนนำเข้า ระบบแสดงทุกแถวสต็อก (`Company + Location + Inventory Status`) ให้เลือกติ๊ก Location ที่ต้องการถ่ายก่อนกดนำเข้า (เลือก 1 หรือหลาย Location ได้ พร้อมปุ่มเลือกทั้งหมด/ล้าง/กรองตามสถานะ) และยังแก้ไขเพิ่ม/เปลี่ยน/เอา Location ที่ยังไม่ถ่ายออกภายหลังได้จากหน้าสินค้า
+- ทุกครั้งที่บันทึกภาพ (Revision) ระบบจะเก็บ Snapshot ของ `Company`, `Location`, `Inventory Status`, `On Hand Qty` และ `เวลาบันทึกสถานะสต็อก` ไว้ถาวรใน `PIM_Revisions`, `Data`, Excel/CSV และ PDF เพื่อไม่ให้ข้อมูลหายแม้สต็อกภายหลังย้าย Location หรือเปลี่ยนสถานะ
 - งานรอถ่ายเดิมที่ยังไม่มีรูปและยังไม่แยกสถานะจะถูกแตกงานอัตโนมัติตามสต็อกล่าสุดผ่านคำสั่ง `splitPendingStock` โดยไม่กระทบงานเก่าที่ถ่ายแล้ว
 - ประวัติ Revision แยกตามชุด `Item Code + Company + Location + Inventory Status` เพื่อไม่ให้รูปคนละสถานะหรือคนละ Location ทับกัน
 - หน้าถ่ายภาพไฮไลต์แถวที่กำลังถ่ายในตาราง `Stock · Location แยกตามบริษัท` และคลิกสลับไปถ่ายชุดถัดไปของรหัสเดียวกันได้ทันที

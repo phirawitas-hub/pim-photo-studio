@@ -48,9 +48,13 @@ export async function saveProduct(p,onProgress=()=>{}){
  await uploadProductPhotos(p,onProgress);
  p.pendingRevision=p.pendingRevision||uid();await db.put('products',p);
  const photos=Object.fromEntries(ANGLES.map(a=>[a.id,(p.photos?.[a.id]||[]).map(x=>({id:x.id,fileId:x.fileId,name:x.name||'',size:x.size||0}))]));
+ const snapCompany=String(p.stockCompany||'').trim().toUpperCase(),snapLocation=String(p.stockLocation||'').trim(),snapStatus=normalizeInventoryStatus(p.stockStatus||'');
+ const snapQty=String(p.liveStockQty!==undefined&&p.liveStockQty!==''?p.liveStockQty:(p.stockQty??'')).trim();
+ const meta={fields:p.fields||{},dimensions:p.dimensions||{},purpose:p.purpose||''};
+ if(snapCompany||snapLocation||snapStatus)meta.stockSnapshot={company:snapCompany,location:snapLocation,status:snapStatus,qty:snapQty};
  onProgress('บันทึกเวอร์ชันลง Google Sheet');
- const r=await rpc('revision',{id:p.pendingRevision,productId:p.id,baseRevision:p.itemHead||p.baseRevision||null,meta:{fields:p.fields||{},dimensions:p.dimensions||{},purpose:p.purpose||''},photos});
- p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.sheetId=config.sheetId;p.syncedAt=r.at;await db.put('products',p);
+ const r=await rpc('revision',{id:p.pendingRevision,productId:p.id,baseRevision:p.itemHead||p.baseRevision||null,meta,photos});
+ p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.sheetId=config.sheetId;p.syncedAt=r.at;if(r.stockSnapshot){p.stockSnapshot=r.stockSnapshot;p.stockQty=r.stockSnapshot.qty;}await db.put('products',p);
 }
 export async function itemHistory(code,scope){return rpc('itemHistory',scope?{code,productId:scope.id||'',stockCompany:scope.stockCompany||'',stockLocation:scope.stockLocation||'',stockStatus:scope.stockStatus||''}:{code});}
 export async function stock(code){return rpc('stock',{code});}
@@ -59,7 +63,7 @@ export async function validateItems(codes){
  return rpc('validateItems',{codes});
 }
 export async function selectRevision(p,revisionId){assertSheet(p);const r=await rpc('selectRevision',{productId:p.id,revisionId});const history=await itemHistory(p.code,p);applyRevision(p,r.revision,history);p.syncedAt=r.at;await db.put('products',p);return p;}
-export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
+export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.stockSnapshot=meta.stockSnapshot||null;if(p.stockSnapshot&&!p.stockCompany&&!p.stockLocation&&!p.stockStatus){p.stockCompany=p.stockSnapshot.company||'';p.stockLocation=p.stockSnapshot.location||'';p.stockStatus=normalizeInventoryStatus(p.stockSnapshot.status||'');p.stockQty=p.stockSnapshot.qty??'';}p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
 export async function loadProducts(snapshot){
  const data=snapshot||await rpc('snapshot');if(!['imports','products','revisions','selections'].every(k=>Array.isArray(data?.[k])))throw Error('ข้อมูลจากชีตไม่ครบ กรุณารีเฟรชอีกครั้ง');const completed=new Set(data.imports.map(r=>r[0])),rows=data.products.filter(r=>completed.has(r[4])),revisions=data.revisions,selections=data.selections;
  const mapped=rows.map(r=>({id:r[0],code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7],stockCompany:String(r[8]||'').trim().toUpperCase(),stockLocation:String(r[9]||'').trim(),stockStatus:normalizeInventoryStatus(r[10]||''),stockQty:r[11]??''}));
@@ -72,6 +76,7 @@ export const changeOption=(kind,value,operation)=>rpc('option',{kind,value,opera
 
 export const snapshot=()=>rpc('snapshot');
 export const splitPendingStock=()=>rpc('splitPendingStock');
+export const updateJobLocations=payload=>rpc('updateJobLocations',payload);
 export const saveBranding=brand=>rpc('branding',brand);
 
 export const deletePreview=(batchId,batchName)=>rpc('deletePreview',{batchId,batchName});

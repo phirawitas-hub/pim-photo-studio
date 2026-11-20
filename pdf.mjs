@@ -14,17 +14,28 @@ function stockPalette(status){
  if(s==='BORROW')return {bg:'#e6f7f8',fg:'#007980'};
  return {bg:'#f2f4f8',fg:'#4a5568'};
 }
+function resolvedStock(product){
+ const snap=product?.stockSnapshot||null;
+ return {
+  company:snap?.company||product?.stockCompany||'',
+  location:snap?.location||product?.stockLocation||'',
+  status:snap?.status||product?.stockStatus||'',
+  qty:snap?.qty!==undefined&&snap?.qty!==''?snap.qty:(product?.stockQty??''),
+  capturedAt:snap?.capturedAt||''
+ };
+}
 function stockScopeLine(product){
- const parts=[product.stockCompany,product.stockLocation,product.stockStatus].map(v=>String(v||'').trim()).filter(Boolean);
+ const st=resolvedStock(product);
+ const parts=[st.company,st.location,st.status].map(v=>String(v||'').trim()).filter(Boolean);
  if(!parts.length)return '';
- const qty=product.stockQty!==undefined&&product.stockQty!==null&&String(product.stockQty).trim()!==''?'  ·  Qty '+String(product.stockQty).trim():'';
+ const qty=st.qty!==undefined&&st.qty!==null&&String(st.qty).trim()!==''?'  ·  Qty '+String(st.qty).trim():'';
  return parts.join('  ·  ')+qty;
 }
 export function pdfFilename(products,now=new Date()){
  const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
  if(products.length!==1)return 'PIM-Photo-Report-'+day+'.pdf';
- const p=products[0],slug=v=>String(v||'').trim().replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
- const parts=[p.code,p.stockCompany,p.stockLocation,p.stockStatus].map(slug).filter(Boolean);
+ const p=products[0],st=resolvedStock(p),slug=v=>String(v||'').trim().replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
+ const parts=[p.code,st.company,st.location,st.status].map(slug).filter(Boolean);
  return 'PIM-Photo-'+(parts.join('-')||'Item')+'-'+day+'.pdf';
 }
 function bytes(s){return new TextEncoder().encode(s);}
@@ -108,6 +119,8 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
   ANGLES.forEach((a,i)=>{const x=M+(i%2)*(half+24),cy=y+Math.floor(i/2)*63,n=product.photos?.[a.id]?.length||0;panel(x,cy,half,52,'#f7f8fa');line(a.name,x+16,cy+15,18,500);line(String(n)+' รูป',x+half-70,cy+15,18,600,n?blue:muted);});
   y+=278;line('บันทึกลงชีตล่าสุด',M,y,17,500,muted);
   line(product.syncedAt?new Date(product.syncedAt).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false}):'ยังไม่บันทึก',M,y+29,21,500);
+  const snapAt=resolvedStock(product).capturedAt;
+  if(snapAt){line('บันทึก Location / สถานะ ณ เวลาถ่าย',M+420,y,17,500,muted);line(new Date(snapAt).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false}),M+420,y+29,21,500);}
   await finish(product);return overflow;
  }
 

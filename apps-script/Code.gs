@@ -40,7 +40,7 @@ function pimCall(request) {
   if(!request || typeof request!=='object' || Array.isArray(request))throw Error('คำขอไม่ถูกต้อง');
   if(request.sheetId && request.sheetId!==sheetId)throw Error('แอปนี้ใช้งานได้เฉพาะชีต PIM ที่กำหนดไว้');
   request={...request,sheetId};
-  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','validateItems','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport','splitPendingStock'];
+  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','validateItems','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport','splitPendingStock','updateJobLocations'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
   const readOnly=['hello','read','stock','validateItems','itemHistory','photo','snapshot','workspace'].includes(request.action);
   const lock=readOnly?null:LockService.getScriptLock();
@@ -62,6 +62,7 @@ function pimCall(request) {
     switch(request.action) {
       case 'deleteImport':return deleteImport_(ss,p);
       case 'splitPendingStock': return splitPendingStock_(ss);
+      case 'updateJobLocations': return updateJobLocations_(ss,p);
       case 'branding': return saveBranding_(ss,p);
       case 'option': return option_(ss,p);
       case 'selectRevision': return selectRevision_(ss,p);
@@ -212,11 +213,17 @@ function revision_(ss,p) {
     }
   }
   if(!String(p.meta?.fields?.photographer||'').trim())throw Error('กรุณาระบุชื่อผู้ถ่าย');
-  const meta=JSON.stringify({...p.meta,revisionNumber:rows.length+1}),manifest=JSON.stringify(photos);if(meta.length>40000||manifest.length>40000)throw Error('รายละเอียดมีขนาดใหญ่เกินไป');
   const at=new Date().toISOString(),complete=PIM_ANGLES.slice(0,7).every(a=>(photos[a]||[]).length>0);
+  const snapCompany=String(product[8]||p.meta?.stockSnapshot?.company||'').trim().toUpperCase();
+  const snapLocation=String(product[9]||p.meta?.stockSnapshot?.location||'').trim();
+  const snapStatus=normStatus_(product[10]||p.meta?.stockSnapshot?.status||'');
+  const snapQty=String(p.meta?.stockSnapshot?.qty!==undefined&&p.meta?.stockSnapshot?.qty!==''?p.meta.stockSnapshot.qty:(product[11]??'')).trim();
+  const metaObj={...p.meta,revisionNumber:rows.length+1};
+  if(snapCompany||snapLocation||snapStatus)metaObj.stockSnapshot={company:snapCompany,location:snapLocation,status:snapStatus,qty:snapQty,capturedAt:at};
+  const meta=JSON.stringify(metaObj),manifest=JSON.stringify(photos);if(meta.length>40000||manifest.length>40000)throw Error('รายละเอียดมีขนาดใหญ่เกินไป');
   append_(ss,'PIM_Revisions',[[p.id,p.productId,at,complete,meta,manifest]]);
   selectRevision_(ss,{productId:p.productId,revisionId:p.id});
-  SpreadsheetApp.flush();return {id:p.id,at,number:rows.length+1};
+  SpreadsheetApp.flush();return {id:p.id,at,number:rows.length+1,stockSnapshot:metaObj.stockSnapshot||null};
 }
 function photo_(ss,fileId) {
   const row=table_(ss,'PIM_Files').find(r=>r[1]===fileId&&r[2]==='photo');
@@ -269,7 +276,7 @@ function sourceData_(ss,product,cache){
 }
 function dataHeaders_(s,extra){
  let headers=s.getLastRow()?s.getRange(1,1,1,Math.max(1,s.getLastColumn())).getDisplayValues()[0]:[];const oldLength=headers.length;
- const required=[...DATA_BASE,...extra,'PIM Product ID','Import ID','ไฟล์นำเข้า','ลิงก์ไฟล์ต้นฉบับ','แท็บต้นฉบับ','แถวต้นฉบับ','Stock Company','Stock Location','Inventory Status','On Hand Qty','สถานะถ่ายภาพ','จำนวนรูป','มุมบังคับครบ','อัปเดตล่าสุด','วันที่เวลาบันทึก','วันที่เวลานำเข้าระบบ','Revision','Revision ID',...Object.values(DATA_FIELDS)];
+ const required=[...DATA_BASE,...extra,'PIM Product ID','Import ID','ไฟล์นำเข้า','ลิงก์ไฟล์ต้นฉบับ','แท็บต้นฉบับ','แถวต้นฉบับ','Stock Company','Stock Location','Inventory Status','On Hand Qty','เวลาบันทึกสถานะสต็อก','สถานะถ่ายภาพ','จำนวนรูป','มุมบังคับครบ','อัปเดตล่าสุด','วันที่เวลาบันทึก','วันที่เวลานำเข้าระบบ','Revision','Revision ID',...Object.values(DATA_FIELDS)];
  for(const group of ['Physical Product','Original Package (Inner)','Original Package (Outer)','Delivery Package'])for(const field of ['Width (cm)','Length (cm)','Height (cm)','Net Weight (kg)','Gross Weight (kg)'])required.push(group+' · '+field);
  for(const name of DATA_ANGLE_NAMES)for(let i=1;i<=5;i++)required.push(name+' '+i);
  const keys=new Set(headers.filter(Boolean).map(h=>normData_(dataKey_(h))));
@@ -291,9 +298,10 @@ function writeData_(ss,product,revision,cache){
  const selected=table_(ss,'PIM_Selections').filter(r=>r[0]===product[0]).pop();
  changes['วันที่เวลาบันทึก']=selected?.[2]||values[index[normData_('วันที่เวลาบันทึก')]]||new Date().toISOString();
  for(const [h,v] of Object.entries(original)){const col=index[normData_(dataKey_(h))];if(found<0||values[col]==='')changes[h]=v;}
- Object.assign(changes,{'PIM Product ID':product[0],'Import ID':product[4],'รหัสสินค้า':product[1],'ชื่อสินค้า':product[2],'วัตถุประสงค์':product[3],'ไฟล์นำเข้า':imported[1],'ลิงก์ไฟล์ต้นฉบับ':'https://drive.google.com/file/d/'+imported[3]+'/view','แท็บต้นฉบับ':product[5],'แถวต้นฉบับ':product[6],'Stock Company':product[8]||'','Stock Location':product[9]||'','Inventory Status':product[10]||'','On Hand Qty':product[11]??''});
+ const revMeta=revision?JSON.parse(revision[4]||'{}'):null,revSnap=revMeta?.stockSnapshot||null;
+ Object.assign(changes,{'PIM Product ID':product[0],'Import ID':product[4],'รหัสสินค้า':product[1],'ชื่อสินค้า':product[2],'วัตถุประสงค์':product[3],'ไฟล์นำเข้า':imported[1],'ลิงก์ไฟล์ต้นฉบับ':'https://drive.google.com/file/d/'+imported[3]+'/view','แท็บต้นฉบับ':product[5],'แถวต้นฉบับ':product[6],'Stock Company':revSnap?.company||product[8]||'','Stock Location':revSnap?.location||product[9]||'','Inventory Status':normStatus_(revSnap?.status||product[10]||''),'On Hand Qty':revSnap?.qty!==undefined&&revSnap?.qty!==''?revSnap.qty:(product[11]??''),'เวลาบันทึกสถานะสต็อก':revSnap?.capturedAt||''});
  if(revision){
-  const meta=JSON.parse(revision[4]||'{}'),photos=JSON.parse(revision[5]||'{}');let total=0,required=0;
+  const meta=revMeta||{},photos=JSON.parse(revision[5]||'{}');let total=0,required=0;
   PIM_ANGLES.forEach((key,n)=>{const list=photos[key]||[];total+=list.length;if(n<7&&list.length)required++;for(let i=0;i<5;i++)changes[DATA_ANGLE_NAMES[n]+' '+(i+1)]=list[i]?'https://drive.google.com/file/d/'+list[i].fileId+'/view':'';});
   Object.assign(changes,{'วัตถุประสงค์':revision[1]===product[0]?(meta.purpose??product[3]):product[3],'สถานะถ่ายภาพ':required===7?'ถ่ายครบแล้ว':total?'กำลังดำเนินการ':'รอถ่ายรูป','จำนวนรูป':total,'มุมบังคับครบ':required+'/7','อัปเดตล่าสุด':revision[2],'Revision ID':revision[0],'Revision':meta.revisionNumber||productHistory_(ss,product).findIndex(r=>r[0]===revision[0])+1});
   for(const [key,name] of Object.entries(DATA_FIELDS))changes[name]=meta.fields?.[key]??'';
@@ -306,7 +314,7 @@ function writeData_(ss,product,revision,cache){
  for(const group of groups)s.getRange(row,group[0][0]+1,1,group.length).setValues([group.map(e=>raw_(e[1]))]);
  // Store native date cells so sorting/filtering works; display Bangkok wall time.
  ss.setSpreadsheetTimeZone('Asia/Bangkok');
- for(const h of ['วันที่เวลาบันทึก','วันที่เวลานำเข้าระบบ','อัปเดตล่าสุด']){
+ for(const h of ['วันที่เวลาบันทึก','วันที่เวลานำเข้าระบบ','อัปเดตล่าสุด','เวลาบันทึกสถานะสต็อก']){
   const col=index[normData_(h)];if(col===undefined)continue;
   const value=changes[h]!==undefined?changes[h]:values[col];
   const date=value instanceof Date?value:new Date(value);
@@ -464,6 +472,76 @@ function splitPendingStock_(ss){
 function splitPendingStockNow(){
  return pimCall({action:'splitPendingStock'});
 }
+function updateJobLocations_(ss,p){
+ id_(p.importId);
+ const codeKey=itemKey_(p.code);
+ if(!codeKey)throw Error('ระบุ Item Code ไม่ถูกต้อง');
+ if(!Array.isArray(p.slots)||!p.slots.length||p.slots.length>100)throw Error('กรุณาเลือกอย่างน้อย 1 Location (สูงสุด 100 รายการ)');
+ if(!table_(ss,'PIM_Imports').some(r=>r[0]===p.importId))throw Error('ไม่พบงานนำเข้าที่บันทึกเสร็จ');
+ const prodSheet=ss.getSheetByName('PIM_Products');
+ if(!prodSheet||prodSheet.getLastRow()<2)throw Error('ไม่พบรายการสินค้าในชีต');
+ const expectedLen=PIM_SCHEMA.PIM_Products.length;
+ const cols=typeof prodSheet.getLastColumn==='function'?Math.min(Math.max(1,prodSheet.getLastColumn()),expectedLen):expectedLen;
+ const rawRows=prodSheet.getRange(2,1,prodSheet.getLastRow()-1,cols).getDisplayValues().map(r=>cols===expectedLen?r:[...r,...Array(expectedLen-cols).fill('')]);
+ const existing=[];
+ for(let i=0;i<rawRows.length;i++){
+  const r=rawRows[i];
+  if(r[0]&&r[4]===p.importId&&itemKey_(r[1])===codeKey)existing.push({sheetRow:i+2,row:r,id:r[0],slotKey:stockSlotKey_(r[8],r[9],r[10])});
+ }
+ if(!existing.length)throw Error('ไม่พบสินค้านี้ในงานนำเข้า');
+ const desired=stockSlots_(p.slots);
+ if(!desired.length)throw Error('กรุณาเลือกอย่างน้อย 1 Location');
+ const desiredMap=new Map(desired.map(s=>[s.slotKey,s]));
+ const lockedIds=new Set([...table_(ss,'PIM_Revisions').map(r=>r[1]),...table_(ss,'PIM_Selections').map(r=>r[0]),...table_(ss,'PIM_Files').filter(r=>r[2]==='photo').map(r=>r[3])]);
+ const kept=[],removable=[],satisfied=new Set();
+ for(const item of existing){
+  const isLocked=lockedIds.has(item.id);
+  if(desiredMap.has(item.slotKey)&&!satisfied.has(item.slotKey)){kept.push(item);satisfied.add(item.slotKey);}
+  else if(isLocked){
+   // Keep legacy/photographed rows intact and reject removing photographed scoped slots.
+   if(item.row[8]||item.row[9]||item.row[10])throw Error('ไม่สามารถเอา Location ที่ถ่ายรูปหรือมีประวัติแล้วออกได้');
+   kept.push(item);
+  }else removable.push(item);
+ }
+ const toAdd=desired.filter(s=>!satisfied.has(s.slotKey));
+ const touched=[],addedRows=[],addedIds=[];
+ grow_(prodSheet,prodSheet.getLastRow(),expectedLen);
+ // Swap unphotographed jobs in-place first so changing mind to another location updates the existing row cleanly.
+ const swapCount=Math.min(removable.length,toAdd.length);
+ for(let i=0;i<swapCount;i++){
+  const item=removable[i],slot=toAdd[i];
+  prodSheet.getRange(item.sheetRow,9,1,4).setValues([[raw_(slot.company),raw_(slot.location),raw_(slot.status),raw_(slot.qty)]]);
+  touched.push([...item.row.slice(0,8),slot.company,slot.location,slot.status,slot.qty]);
+ }
+ const template=existing[0].row;
+ for(const slot of toAdd.slice(swapCount)){
+  const id=uuid_(),newRow=[id,template[1],template[2],template[3],template[4],template[5],template[6],template[7],slot.company,slot.location,slot.status,slot.qty];
+  addedRows.push(newRow);addedIds.push(id);touched.push(newRow);
+ }
+ const toRemove=removable.slice(swapCount),removedIds=new Set(toRemove.map(x=>x.id));
+ if(addedRows.length)append_(ss,'PIM_Products',addedRows);
+ if(removedIds.size){
+  removeRows_(ss,'PIM_Products',r=>removedIds.has(r[0]));
+  const data=ss.getSheetByName('Data');
+  if(data&&data.getLastRow()>1){
+   const h=data.getRange(1,1,1,data.getLastColumn()).getDisplayValues()[0],idCol=h.indexOf('PIM Product ID');
+   if(idCol>=0)removeRows_(ss,'Data',r=>removedIds.has(r[idCol]));
+  }
+ }
+ delete PIM_TABLE_CACHE.PIM_Products;
+ const allProducts=table_(ss,'PIM_Products');
+ const impSheet=ss.getSheetByName('PIM_Imports');
+ if(impSheet&&impSheet.getLastRow()>1){
+  const impRows=impSheet.getRange(2,1,impSheet.getLastRow()-1,PIM_SCHEMA.PIM_Imports.length).getDisplayValues();
+  impRows.forEach((imp,idx)=>{if(imp[0]===p.importId)impSheet.getRange(idx+2,6).setValue(allProducts.filter(r=>r[4]===p.importId).length);});
+  delete PIM_TABLE_CACHE.PIM_Imports;
+ }
+ const cache={};
+ for(const prod of touched)writeData_(ss,prod,null,cache);
+ SpreadsheetApp.flush();
+ const activeProductId=(kept[0]?.id)||(touched[0]?.[0])||'';
+ return {kept:kept.length,updated:swapCount,added:addedIds,removed:[...removedIds],activeProductId};
+}
 // The bridge contains no account UI. Only the authorized GitHub origin can invoke
 // it, and responses are sent exclusively to that origin. Google sign-in/access
 // restrictions still apply to this deployment. There is no anonymous endpoint.
@@ -514,7 +592,7 @@ function saveBranding_(ss,p){
 // files, then remove rows. A tombstone prevents offline clients restoring jobs.
 function assertActiveImport_(ss,action,p){
  const deleted=new Set(table_(ss,'PIM_Deletions').map(r=>r[0]));if(!deleted.size)return;
- const ids=[p.batchId];if(action==='finishImport')ids.push(p.row?.[0]);if(action==='products')for(const r of p.rows||[])ids.push(r[4]);
+ const ids=[p.batchId,p.importId];if(action==='finishImport')ids.push(p.row?.[0]);if(action==='products')for(const r of p.rows||[])ids.push(r[4]);
  if(action==='upload'&&p.kind==='import')ids.push(String(p.key||'').replace(/^import-/,''));
  if(p.productId)ids.push(table_(ss,'PIM_Products').find(r=>r[0]===p.productId)?.[4]);
  if(ids.some(id=>deleted.has(id)))throw Error('ไฟล์นำเข้านี้ถูกลบแล้ว กรุณารีเฟรชข้อมูล');

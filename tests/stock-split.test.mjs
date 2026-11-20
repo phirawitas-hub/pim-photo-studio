@@ -297,3 +297,145 @@ test('pullCloud automatically splits pending unphotographed jobs once and recove
  assert.equal(splitCalls,1); // Remembered unsupported backend, did not break refresh.
  assert.equal(b.local.size,1);
 });
+
+test('revision freezes stockSnapshot (Location, Status, Qty, timestamp) in PIM_Revisions and Data even if live stock changes later',()=>{
+ const sheets=new Map([
+  ['PIM_Products',mockSheet([
+   ['id','Item Code','Product Name','Purpose','Import ID','Source Sheet','Source Row','Created At','Stock Company','Stock Location','Inventory Status','Stock Qty'],
+   ['p1','800353','Oil','ลูกค้า','b1','Form','9','2026-11-20T00:00:00Z','VP','B-HELMET-02-16','Damage','43']
+  ])],
+  ['PIM_Imports',mockSheet([
+   ['id','File Name','Created At','Drive File ID','Source Sheets','Products'],
+   ['b1','req.xlsx','2026-11-20T00:00:00Z','drv1','Form','1']
+  ])],
+  ['PIM_Revisions',mockSheet([['id','Product ID','Updated At','Complete','Metadata JSON','Photos JSON']])],
+  ['PIM_Selections',mockSheet([['Product ID','Revision ID','Saved At']])],
+  ['PIM_Files',mockSheet([
+   ['key','Drive File ID','Kind','Product ID','Angle','Size','MIME'],
+   ['photo-1','f1','photo','p1','top','100','image/jpeg']
+  ])],
+  ['PIM_Source',mockSheet([['id','Part','Source Metadata JSON']])],
+  ['PIM_Deletions',mockSheet([['Import ID','Deleted At','File Name','Plan JSON','Status']])],
+  ['PIM_Branding',mockSheet([['Key','Value']])],
+  ['PIM_Options',mockSheet([['Kind','Value','Active']])],
+  ['Data',mockSheet([['PIM Product ID','Import ID','รหัสสินค้า','ชื่อสินค้า','สถานะถ่ายภาพ']])]
+ ]);
+ const ss={
+  getId:()=>'test-sheet-123456',getName:()=>'Test',
+  getSheetByName:name=>sheets.get(name)||null,
+  insertSheet:name=>{const s=mockSheet();sheets.set(name,s);return s;},
+  setSpreadsheetTimeZone(){}
+ };
+ const ctx=vm.createContext({
+  console,Date,Set,Map,
+  PropertiesService:{getScriptProperties:()=>({getProperty:()=>'test-sheet-123456'})},
+  LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock(){}})},
+  SpreadsheetApp:{openById:()=>ss,flush(){},newRichTextValue(){const v={};return {setText(t){v.text=t;return this;},setLinkUrl(u){v.url=u;return this;},build(){return v;}};}}
+ });
+ vm.runInContext(backendCode,ctx);
+
+ const saved=ctx.pimCall({
+  sheetId:'test-sheet-123456',
+  action:'revision',
+  payload:{
+   id:'rev-snap-1',productId:'p1',baseRevision:null,
+   meta:{fields:{photographer:'PHIRAWIT'},stockSnapshot:{company:'VP',location:'B-HELMET-02-16',status:'Damage',qty:'39'}},
+   photos:{top:[{fileId:'f1'}]}
+  }
+ });
+ assert.equal(saved.stockSnapshot.company,'VP');
+ assert.equal(saved.stockSnapshot.location,'B-HELMET-02-16');
+ assert.equal(saved.stockSnapshot.status,'Damage');
+ assert.equal(saved.stockSnapshot.qty,'39');
+ assert.ok(saved.stockSnapshot.capturedAt);
+
+ // Revision Metadata JSON permanently stores the snapshot.
+ const revMeta=JSON.parse(sheets.get('PIM_Revisions').rows[1][4]);
+ assert.deepEqual(revMeta.stockSnapshot,{...saved.stockSnapshot});
+
+ // Data sheet stores the frozen snapshot and timestamp.
+ const dh=sheets.get('Data').rows[0],dr=sheets.get('Data').rows[1];
+ assert.equal(dr[dh.indexOf('Stock Company')],'VP');
+ assert.equal(dr[dh.indexOf('Stock Location')],'B-HELMET-02-16');
+ assert.equal(dr[dh.indexOf('Inventory Status')],'Damage');
+ assert.equal(dr[dh.indexOf('On Hand Qty')],'39');
+ assert.ok(dr[dh.indexOf('เวลาบันทึกสถานะสต็อก')] instanceof Date);
+});
+
+test('updateJobLocations swaps unphotographed locations in place, adds/removes unselected locations, and protects photographed locations',()=>{
+ const sheets=new Map([
+  ['PIM_Products',mockSheet([
+   ['id','Item Code','Product Name','Purpose','Import ID','Source Sheet','Source Row','Created At','Stock Company','Stock Location','Inventory Status','Stock Qty'],
+   ['p-shot','800353','Oil','ลูกค้า','b1','Form','9','2026-11-20T00:00:00Z','VP','B-01-025-A','Incomplete','43'],
+   ['p-wait-1','800353','Oil','ลูกค้า','b1','Form','9','2026-11-20T00:00:00Z','VP','B-HELMET-02-16','Damage','43'],
+   ['p-wait-2','800353','Oil','ลูกค้า','b1','Form','9','2026-11-20T00:00:00Z','VP','B-HELMET-03-20','Damage','33']
+  ])],
+  ['PIM_Imports',mockSheet([
+   ['id','File Name','Created At','Drive File ID','Source Sheets','Products'],
+   ['b1','req.xlsx','2026-11-20T00:00:00Z','drv1','Form','3']
+  ])],
+  ['PIM_Revisions',mockSheet([
+   ['id','Product ID','Updated At','Complete','Metadata JSON','Photos JSON'],
+   ['rev-1','p-shot','2026-11-20T01:00:00Z','TRUE','{"fields":{"photographer":"P"}}','{"top":[{"fileId":"f1"}]}']
+  ])],
+  ['PIM_Selections',mockSheet([
+   ['Product ID','Revision ID','Saved At'],
+   ['p-shot','rev-1','2026-11-20T01:00:00Z']
+  ])],
+  ['PIM_Files',mockSheet([
+   ['key','Drive File ID','Kind','Product ID','Angle','Size','MIME'],
+   ['photo-1','f1','photo','p-shot','top','100','image/jpeg']
+  ])],
+  ['PIM_Source',mockSheet([['id','Part','Source Metadata JSON']])],
+  ['PIM_Deletions',mockSheet([['Import ID','Deleted At','File Name','Plan JSON','Status']])],
+  ['PIM_Branding',mockSheet([['Key','Value']])],
+  ['PIM_Options',mockSheet([['Kind','Value','Active']])],
+  ['Data',mockSheet([
+   ['PIM Product ID','Import ID','รหัสสินค้า','ชื่อสินค้า','Stock Company','Stock Location','Inventory Status','On Hand Qty'],
+   ['p-shot','b1','800353','Oil','VP','B-01-025-A','Incomplete','43'],
+   ['p-wait-1','b1','800353','Oil','VP','B-HELMET-02-16','Damage','43'],
+   ['p-wait-2','b1','800353','Oil','VP','B-HELMET-03-20','Damage','33']
+  ])]
+ ]);
+ for(const s of sheets.values()){s.deleteRows=(start,count)=>s.rows.splice(start-1,count);}
+ const ss={
+  getId:()=>'test-sheet-123456',getName:()=>'Test',
+  getSheetByName:name=>sheets.get(name)||null,
+  insertSheet:name=>{const s=mockSheet();s.deleteRows=(start,count)=>s.rows.splice(start-1,count);sheets.set(name,s);return s;},
+  setSpreadsheetTimeZone(){}
+ };
+ let seq=0;
+ const ctx=vm.createContext({
+  console,Date,Set,Map,
+  Utilities:{getUuid:()=>'loc-uuid-'+(++seq)},
+  PropertiesService:{getScriptProperties:()=>({getProperty:()=>'test-sheet-123456'})},
+  LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock(){}})},
+  SpreadsheetApp:{openById:()=>ss,flush(){},newRichTextValue(){const v={};return {setText(t){v.text=t;return this;},setLinkUrl(u){v.url=u;return this;},build(){return v;}};}}
+ });
+ vm.runInContext(backendCode,ctx);
+
+ // Cannot remove photographed location (p-shot).
+ assert.throws(()=>ctx.pimCall({
+  sheetId:'test-sheet-123456',action:'updateJobLocations',
+  payload:{importId:'b1',code:'800353',slots:[{company:'VP',location:'B-HELMET-04-02',status:'Damage',qty:'7'}]}
+ }),/ถ่ายรูปหรือมีประวัติแล้ว/);
+
+ // Keep p-shot, swap p-wait-1 -> B-HELMET-04-02 in place, remove p-wait-2.
+ const res=ctx.pimCall({
+  sheetId:'test-sheet-123456',action:'updateJobLocations',
+  payload:{importId:'b1',code:'800353',slots:[
+   {company:'VP',location:'B-01-025-A',status:'Incomplete',qty:'43'},
+   {company:'VP',location:'B-HELMET-04-02',status:'Damage',qty:'7'}
+  ]}
+ });
+ assert.equal(res.kept,1);
+ assert.equal(res.updated,1);
+ assert.deepEqual(Array.from(res.removed),['p-wait-2']);
+ assert.equal(sheets.get('PIM_Products').rows.length,3); // header + p-shot + swapped p-wait-1
+ assert.equal(sheets.get('PIM_Products').rows[2][0],'p-wait-1');
+ assert.equal(sheets.get('PIM_Products').rows[2][9],'B-HELMET-04-02');
+ assert.equal(sheets.get('PIM_Products').rows[2][11],'7');
+ assert.equal(sheets.get('PIM_Imports').rows[1][5],2);
+ assert.equal(sheets.get('Data').rows.length,3);
+ assert.equal(sheets.get('Data').rows[2][5],'B-HELMET-04-02');
+});

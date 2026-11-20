@@ -3,13 +3,13 @@ import {itemCodeKey,stockSlotKey,hasStockScope,stockLabel,normalizeInventoryStat
 import {selectImportSheet} from './importer.mjs?v=20261109simple';
 import {openNativeCamera,cancelNativeCamera,isMobileCameraDevice} from './camera.mjs?v=20261109native';
 import {requesterRanking} from './insights.mjs';
-import {csvRows,encodeCSV,sourceWorkbooks,inImportRange,newestImports,productsByImportDate} from './export.mjs?v=20261120stockstatus';
+import {csvRows,encodeCSV,sourceWorkbooks,inImportRange,newestImports,productsByImportDate} from './export.mjs?v=20261120locations';
 import {initTheme} from './theme.mjs?v=20261103clean';
 initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs';
-import * as db from './store.mjs?v=20261109refresh';
-import * as cloud from './google.mjs?v=20261120stockstatus';
+import * as db from './store.mjs?v=20261120locations';
+import * as cloud from './google.mjs?v=20261120locations';
 import {openPhotoViewer} from './viewer.mjs?v=20261028gallery';
 cloud.warmup();
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
@@ -88,9 +88,11 @@ function renderTable(){
 }
 async function addDemo(){let p=products.find(p=>p.demo);if(!p){p={id:uid(),code:'DEMO-001',name:'สินค้าตัวอย่างสำหรับทดลองถ่ายรูป',purpose:'ข้อมูลสมมติ • ทดลองใช้งาน',demo:true,createdAt:stamp(),photos:{},fields:{},dimensions:{},dirty:true};await db.put('products',p);}location.hash='product/'+p.id;}
 function renderDetail(){
- const p=current,n=progress(p),sibs=siblingProducts(p),sibIndex=sibs.findIndex(x=>x.id===p.id)+1,scoped=hasStockScope(p);
- const scopeBar=scoped?`<div class="detail-stock-scope">${stockStatusBadge(p.stockStatus)}<span class="scope-loc">${esc([p.stockCompany,p.stockLocation].filter(Boolean).join(' · ')||'ไม่ระบุ Location')}</span>${p.stockQty!==''&&p.stockQty!==undefined?`<span class="scope-qty">Qty ${esc(p.stockQty)}</span>`:''}${sibs.length>1?`<span class="scope-count">ชุดที่ ${sibIndex} / ${sibs.length}</span>`:''}</div>`:'';
- const infoRows=[['Item Code',p.code],['Description',p.name],...(scoped?[['Stock Company',p.stockCompany||'—'],['Stock Location',p.stockLocation||'—'],['Inventory Status',normalizeInventoryStatus(p.stockStatus)||'—'],['On Hand Qty (ณ วันนำเข้า)',p.stockQty!==''&&p.stockQty!==undefined?p.stockQty:'—']]:[]),['Purpose of request',p.purpose||'—'],['ไฟล์ต้นฉบับ',batches.find(b=>b.id===p.importId)?.name||'—'],['แท็บ / แถวต้นฉบับ',p.sourceSheet?p.sourceSheet+' / '+p.sourceRow:'—'],['ชื่อผู้ถ่าย',p.fields?.photographer||'ยังไม่ระบุ'],['Revision ที่แสดง / Export',p.newRevision?'ฉบับร่างใหม่':p.revisionNumber||'ยังไม่บันทึก'],['บันทึกลงชีตล่าสุด',fmtDate(p.syncedAt)]];
+ const p=current,n=progress(p),sibs=siblingProducts(p),sibIndex=sibs.findIndex(x=>x.id===p.id)+1,snap=p.stockSnapshot||null;
+ const stCompany=snap?.company||p.stockCompany||'',stLocation=snap?.location||p.stockLocation||'',stStatus=normalizeInventoryStatus(snap?.status||p.stockStatus||''),stQty=snap?.qty!==undefined&&snap?.qty!==''?snap.qty:(p.stockQty??'');
+ const scoped=Boolean(stCompany||stLocation||stStatus);
+ const scopeBar=scoped?`<div class="detail-stock-scope">${stockStatusBadge(stStatus)}<span class="scope-loc">${esc([stCompany,stLocation].filter(Boolean).join(' · ')||'ไม่ระบุ Location')}</span>${stQty!==''&&stQty!==undefined?`<span class="scope-qty">Qty ${esc(stQty)}</span>`:''}${sibs.length>1?`<span class="scope-count">ชุดที่ ${sibIndex} / ${sibs.length}</span>`:''}${snap?.capturedAt?`<span class="scope-count">บันทึกสถานะเมื่อ ${esc(fmtDate(snap.capturedAt))}</span>`:''}</div>`:'';
+ const infoRows=[['Item Code',p.code],['Description',p.name],...(scoped?[['Stock Company',stCompany||'—'],['Stock Location',stLocation||'—'],['Inventory Status',stStatus||'—'],[snap?.capturedAt?'On Hand Qty (ณ เวลาถ่าย)':'On Hand Qty (ณ วันนำเข้า)',stQty!==''&&stQty!==undefined?stQty:'—'],...(snap?.capturedAt?[['บันทึกสถานะสต็อกเมื่อ',fmtDate(snap.capturedAt)]]:[])]:[]),['Purpose of request',p.purpose||'—'],['ไฟล์ต้นฉบับ',batches.find(b=>b.id===p.importId)?.name||'—'],['แท็บ / แถวต้นฉบับ',p.sourceSheet?p.sourceSheet+' / '+p.sourceRow:'—'],['ชื่อผู้ถ่าย',p.fields?.photographer||'ยังไม่ระบุ'],['Revision ที่แสดง / Export',p.newRevision?'ฉบับร่างใหม่':p.revisionNumber||'ยังไม่บันทึก'],['บันทึกลงชีตล่าสุด',fmtDate(p.syncedAt)]];
  main.innerHTML=`<div class="detail-top"><button class="icon-button" id="back" aria-label="กลับรายการสินค้า">${icon('back')}</button><div><div class="breadcrumb"><a href="#products">รายการสินค้า</a> / รายละเอียดสินค้า</div><h1>${esc(p.code)}</h1>${scopeBar}<p class="subtext">${esc(p.name)}</p></div><div class="actions">${badge(p)}<button id="product-pdf" ${n.total?'':'disabled'}>${icon('file')}PDF</button></div></div>${p.demo?'<div class="notice">ข้อมูลสมมติสำหรับทดลองหน้าถ่ายรูป • จะไม่ส่งสินค้าตัวอย่างนี้ขึ้น Google</div>':''}<section class="panel"><div class="panel-head"><h2>Product Information</h2><span class="badge neutral">${p.baseRevision?'มีเวอร์ชันในชีต':'ฉบับร่าง'}</span></div><div class="panel-body detail-grid"><div class="details">${infoRows.map(([k,v])=>`<dl><dt>${k}</dt><dd>${k==='Inventory Status'&&v!=='—'?stockStatusBadge(v):esc(v)}</dd></dl>`).join('')}</div><div class="overall"><h3>ความคืบหน้าการถ่ายรูป</h3><b>${n.required}<small> / 7 มุมบังคับ</small></b><div class="progress-track"><i style="width:${n.required/7*100}%"></i></div><small>${n.total} รูปทั้งหมด · สูงสุดมุมละ 5 รูป</small></div></div></section><section class="panel"><div class="panel-body"><div id="stock-summary">กำลังตรวจสต็อก…</div></div></section><div class="section-tabs">${[['gallery','ภาพถ่ายสินค้า'],['details','ขนาดและข้อมูลเพิ่มเติม'],['history','ประวัติการบันทึก']].map(([id,label])=>`<button data-section="${id}" class="${section===id?'active':''}">${label}</button>`).join('')}</div><div id="detail-content"></div>`;
  loadStock(p);
  $('#product-pdf').onclick=()=>run(async()=>{await saveDraft();openReportPicker([current]);});$('#back').onclick=()=>location.hash='products';main.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>location.hash='product/'+p.id+'/'+b.dataset.section);if(section==='details')renderFields();else if(section==='history')renderHistory();else renderGallery();renderSaveBar();
@@ -142,7 +144,7 @@ function renderHistory(){
  const p=current; (async()=>{try{
   if(!cloud.connected())throw Error('เชื่อม Google เพื่อเลือก Revision ที่เคยถ่ายไว้');
   const rows=await cloud.itemHistory(p.code,p);if(current!==p||!$('#history-content'))return;
-  $('#history-content').innerHTML=rows.length?rows.map((r,i)=>{const meta=JSON.parse(r[4]||'{}'),photos=JSON.parse(r[5]||'{}'),chosen=p.baseRevision===r[0]&&!p.newRevision;return '<div class="revision-item"><div><b>Revision '+(meta.revisionNumber||i+1)+'</b><p>'+esc(meta.fields?.photographer||'ไม่ได้ระบุผู้ถ่าย')+' · '+fmtDate(r[2])+'</p><small>'+Object.values(photos).reduce((n,a)=>n+a.length,0)+' รูป'+(r[1]!==p.id?' · จากงานนำเข้าอื่น':'')+'</small></div><button data-use-revision="'+esc(r[0])+'" '+(chosen?'disabled':'')+'>'+ (chosen?'กำลังแสดง / Export':'ใช้ชุดนี้แสดง / Export')+'</button></div>';}).reverse().join(''):'<p class="subtext">ยังไม่มี Revision ของชุดสินค้านี้</p>';
+  $('#history-content').innerHTML=rows.length?rows.map((r,i)=>{const meta=JSON.parse(r[4]||'{}'),photos=JSON.parse(r[5]||'{}'),chosen=p.baseRevision===r[0]&&!p.newRevision,snap=meta.stockSnapshot;return '<div class="revision-item"><div><b>Revision '+(meta.revisionNumber||i+1)+' '+(snap?.status?stockStatusBadge(snap.status):'')+'</b>'+(snap?'<p class="revision-stock-snap">'+esc([snap.company,snap.location].filter(Boolean).join(' · ')+(snap.qty!==undefined&&snap.qty!==''?' · Qty '+snap.qty:''))+'</p>':'')+'<p>'+esc(meta.fields?.photographer||'ไม่ได้ระบุผู้ถ่าย')+' · '+fmtDate(r[2])+'</p><small>'+Object.values(photos).reduce((n,a)=>n+a.length,0)+' รูป'+(r[1]!==p.id?' · จากงานนำเข้าอื่น':'')+'</small></div><button data-use-revision="'+esc(r[0])+'" '+(chosen?'disabled':'')+'>'+ (chosen?'กำลังแสดง / Export':'ใช้ชุดนี้แสดง / Export')+'</button></div>';}).reverse().join(''):'<p class="subtext">ยังไม่มี Revision ของชุดสินค้านี้</p>';
   main.querySelectorAll('[data-use-revision]').forEach(b=>b.onclick=()=>{
    const select=()=>run(async()=>{busy('กำลังเลือก Revision');await cloud.selectRevision(current,b.dataset.useRevision);closeModal();renderDetail();toast('Data และ PDF จะใช้ Revision ที่เลือก');});
    if(current.dirty){openModal(modalHeader('เปลี่ยนชุดรูปที่แสดง')+'<div class="modal-body"><p>มีฉบับร่างที่ยังไม่บันทึก การเลือกชุดเดิมจะแทนที่ฉบับร่างของรายการนี้ รูปที่เคยบันทึกใน Drive ยังอยู่</p><button id="confirm-select">เลือก Revision นี้</button></div>');$('#confirm-select').onclick=select;}else select();
@@ -153,27 +155,86 @@ async function loadStock(p){
  const target=$('#stock-summary');if(!target)return;
  const sibs=siblingProducts(p);
  const renderSiblingChips=(list,heading)=>list.length?`<div class="stock-siblings-extra"><small>${esc(heading)}</small><div class="sibling-chips">${list.map(s=>{const st=status(s),n=progress(s),active=s.id===p.id;return `<button type="button" class="sibling-chip ${active?'active':''}" data-switch-job="${s.id}" ${active?'disabled':''}>${stockStatusBadge(s.stockStatus)}<span>${esc([s.stockCompany,s.stockLocation].filter(Boolean).join(' · ')||s.code)}</span><small>${st==='complete'?'ครบแล้ว 7/7':n.required+'/7 มุม'}</small></button>`;}).join('')}</div></div>`:'';
- if(!cloud.connected()){target.innerHTML=(sibs.length>1?renderSiblingChips(sibs,'ชุดถ่ายของรหัสนี้ ('+sibs.length+' ชุด · คลิกเพื่อสลับ)'):'')+'<p class="help">เชื่อม Google เพื่อดูสต็อก VP / VSP ล่าสุด</p>';target.querySelectorAll('[data-switch-job]').forEach(el=>el.onclick=()=>location.hash='product/'+el.dataset.switchJob);return;}
+ if(!cloud.connected()){target.innerHTML=(sibs.length>1?renderSiblingChips(sibs,'ชุดถ่ายของรหัสนี้ ('+sibs.length+' ชุด · คลิกเพื่อสลับ)'):'')+'<p class="help">เชื่อม Google เพื่อดูสต็อก VP / VSP ล่าสุดและแก้ไข Location</p>';target.querySelectorAll('[data-switch-job]').forEach(el=>el.onclick=()=>location.hash='product/'+el.dataset.switchJob);return;}
  try{
   const result=await cloud.stock(p.code);if(!target.isConnected||current!==p)return;
   const bySlot=new Map(sibs.filter(hasStockScope).map(s=>[stockSlotKey(s.stockCompany,s.stockLocation,s.stockStatus),s]));
+  const activeSlotKey=hasStockScope(p)?stockSlotKey(p.stockCompany,p.stockLocation,p.stockStatus):'';
+  const liveActive=activeSlotKey?result.rows.find(r=>stockSlotKey(r.company,r.location,r.status)===activeSlotKey):null;
+  if(liveActive&&liveActive.qty!==undefined&&liveActive.qty!=='')p.liveStockQty=String(liveActive.qty).trim();
   const matchedIds=new Set();
-  const hasJobs=sibs.some(hasStockScope);
+  const canEdit=!p.demo&&!!p.importId&&result.rows.length>0;
   const doneSibs=sibs.filter(s=>status(s)==='complete').length;
-  const rowsHtml=result.rows.map(r=>{
+  const rowsHtml=result.rows.map((r,idx)=>{
    const slot=stockSlotKey(r.company,r.location,r.status),job=bySlot.get(slot);
    if(job)matchedIds.add(job.id);
    const active=job&&job.id===p.id,n=job?progress(job):null,st=job?status(job):'';
-   const jobCell=hasJobs?(active?`<span class="badge neutral">กำลังถ่ายชุดนี้</span> <small>${n.required}/7 มุม</small>`:job?`<span class="badge ${st}">${st==='complete'?'ครบแล้ว':'รอ/กำลังถ่าย'} ${n.required}/7</span> <button type="button" class="small" data-switch-job="${job.id}">เปิดชุดนี้</button>`:'<span class="subtext">—</span>'):'';
-   return `<tr class="${active?'stock-row-active':job?'stock-row-link':''}" ${job&&!active?'data-switch-job="'+job.id+'" tabindex="0"':''}><td><b>${esc(r.company)}</b></td><td>${esc(r.location)}</td><td>${stockStatusBadge(r.status)||esc(r.status)}</td><td>${esc(r.categories)}</td><td>${esc(r.qty)}</td>${hasJobs?'<td>'+jobCell+'</td>':''}</tr>`;
+   const jobCell=active?`<span class="badge neutral">กำลังถ่ายชุดนี้</span> <small>${n.required}/7 มุม</small>`:job?`<span class="badge ${st}">${st==='complete'?'ครบแล้ว':'รอ/กำลังถ่าย'} ${n.required}/7</span> <button type="button" class="small" data-switch-job="${job.id}">เปิดชุดนี้</button>`:canEdit?`<button type="button" class="small" data-add-stock-idx="${idx}">+ เพิ่มชุดถ่าย</button>`:'<span class="subtext">ไม่ได้เลือกถ่าย</span>';
+   return `<tr class="${active?'stock-row-active':job?'stock-row-link':''}" ${job&&!active?'data-switch-job="'+job.id+'" tabindex="0"':''}><td><b>${esc(r.company)}</b></td><td>${esc(r.location)}</td><td>${stockStatusBadge(r.status)||esc(r.status)}</td><td>${esc(r.categories)}</td><td>${esc(r.qty)}</td><td>${jobCell}</td></tr>`;
   }).join('');
   const extraSibs=sibs.filter(s=>hasStockScope(s)&&!matchedIds.has(s.id));
-  target.innerHTML='<div class="divider"></div><div class="stock-head"><div><h3>Stock · Location แยกตามบริษัท</h3><p class="help">อ่านจากชีตล่าสุด '+fmtDate(result.checkedAt)+' · แสดงแยกบริษัท Location และสถานะ'+(sibs.length>1?' · คลิกแถวเพื่อสลับชุดถ่ายได้ทันที':'')+'</p></div>'+(sibs.length>1?'<span class="badge '+(doneSibs===sibs.length?'complete':'neutral')+'">ถ่ายแล้ว '+doneSibs+' / '+sibs.length+' ชุด</span>':'')+'</div>'+result.warnings.map(w=>'<p class="notice">'+esc(w)+'</p>').join('')+(result.rows.length?'<div class="table-wrap"><table class="stock-table"><thead><tr><th>บริษัท</th><th>Location</th><th>Inventory Status</th><th>Categories</th><th>On Hand Qty</th>'+(hasJobs?'<th>งานถ่ายภาพ</th>':'')+'</tr></thead><tbody>'+rowsHtml+'</tbody></table></div>':'<p class="subtext">ไม่พบ Item Code นี้ในข้อมูลสต็อกที่อ่านได้</p>')+renderSiblingChips(extraSibs,'ชุดถ่ายอื่นในงานนำเข้านี้ (ไม่พบในสต็อกล่าสุด)');
+  target.innerHTML='<div class="divider"></div><div class="stock-head"><div><h3>Stock · Location แยกตามบริษัท</h3><p class="help">อ่านจากชีตล่าสุด '+fmtDate(result.checkedAt)+' · แสดงแยกบริษัท Location และสถานะ'+(sibs.length>1?' · คลิกแถวเพื่อสลับชุดถ่ายได้ทันที':'')+'</p></div><div class="stock-head-actions">'+(sibs.length>1?'<span class="badge '+(doneSibs===sibs.length?'complete':'neutral')+'">ถ่ายแล้ว '+doneSibs+' / '+sibs.length+' ชุด</span>':'')+(canEdit?'<button type="button" class="small" id="edit-stock-locations">แก้ไข / เลือก Location ที่จะถ่าย</button>':'')+'</div></div>'+result.warnings.map(w=>'<p class="notice">'+esc(w)+'</p>').join('')+(result.rows.length?'<div class="table-wrap"><table class="stock-table"><thead><tr><th>บริษัท</th><th>Location</th><th>Inventory Status</th><th>Categories</th><th>On Hand Qty</th><th>งานถ่ายภาพ</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>':'<p class="subtext">ไม่พบ Item Code นี้ในข้อมูลสต็อกที่อ่านได้</p>')+renderSiblingChips(extraSibs,'ชุดถ่ายอื่นในงานนำเข้านี้ (Location/สถานะเดิมก่อนเปลี่ยนแปลง)');
   target.querySelectorAll('[data-switch-job]').forEach(el=>{
    el.onclick=e=>{if(e.target.closest('button')&&el.tagName==='TR')return;location.hash='product/'+el.dataset.switchJob;};
    if(el.tagName==='TR')el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();location.hash='product/'+el.dataset.switchJob;}};
   });
+  $('#edit-stock-locations')?.addEventListener('click',()=>openEditLocations(p,result.rows));
+  target.querySelectorAll('[data-add-stock-idx]').forEach(btn=>btn.onclick=()=>run(async()=>{
+   const add=result.rows[Number(btn.dataset.addStockIdx)];if(!add)return;
+   const currentSlots=sibs.filter(hasStockScope).map(s=>({company:s.stockCompany,location:s.stockLocation,status:s.stockStatus,qty:s.stockQty??''}));
+   currentSlots.push({company:add.company,location:add.location,status:add.status,qty:add.qty??''});
+   await applyJobLocations(p,currentSlots,stockSlotKey(add.company,add.location,add.status));
+  }));
  }catch(e){if(target.isConnected)target.textContent=e.message;}
+}
+async function applyJobLocations(p,slots,focusSlotKey=''){
+ if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ก่อนแก้ไข Location');
+ busy('กำลังอัปเดต Location ที่จะถ่ายในชีต');
+ const res=await cloud.updateJobLocations({importId:p.importId,code:p.code,slots});
+ for(const id of res.removed||[])await db.remove('products',id);
+ closeModal();
+ await refreshCloud(true);
+ await reloadLocal();
+ const sibs=siblingProducts(p);
+ const target=(focusSlotKey&&sibs.find(s=>stockSlotKey(s.stockCompany,s.stockLocation,s.stockStatus)===focusSlotKey))||sibs.find(s=>s.id===p.id)||sibs.find(s=>s.id===res.activeProductId)||sibs[0];
+ if(target){current=target;location.hash='product/'+target.id;renderDetail();}else location.hash='products';
+ toast('อัปเดต Location ที่จะถ่ายแล้ว ('+sibs.length+' ชุด)');
+}
+function openEditLocations(p,liveRows=[]){
+ const sibs=siblingProducts(p);
+ const bySlot=new Map();
+ const entries=[];
+ for(const r of liveRows){
+  const company=String(r.company||'').trim().toUpperCase(),location=String(r.location||'').trim(),invStatus=normalizeInventoryStatus(r.status||''),qty=r.qty!==undefined&&r.qty!==null?String(r.qty).trim():'';
+  const key=stockSlotKey(company,location,invStatus);
+  if(bySlot.has(key))continue;
+  const job=sibs.find(s=>hasStockScope(s)&&stockSlotKey(s.stockCompany,s.stockLocation,s.stockStatus)===key)||null;
+  const locked=Boolean(job&&(job.baseRevision||progress(job).total>0));
+  const entry={key,company,location,status:invStatus,qty,job,checked:!!job,locked,live:true};
+  bySlot.set(key,entry);entries.push(entry);
+ }
+ for(const s of sibs.filter(hasStockScope)){
+  const key=stockSlotKey(s.stockCompany,s.stockLocation,s.stockStatus);
+  if(bySlot.has(key))continue;
+  const locked=Boolean(s.baseRevision||progress(s).total>0);
+  const entry={key,company:s.stockCompany,location:s.stockLocation,status:normalizeInventoryStatus(s.stockStatus),qty:s.stockQty??'',job:s,checked:true,locked,live:false};
+  bySlot.set(key,entry);entries.push(entry);
+ }
+ if(!entries.length)return toast('ไม่พบข้อมูล Location ในสต็อกสำหรับรหัสนี้',true);
+ const renderBody=()=>{
+  const chosen=entries.filter(e=>e.checked);
+  openModal(modalHeader('แก้ไข / เลือก Location ที่จะถ่าย · '+esc(p.code))+'<div class="modal-body"><p class="subtext">'+esc(p.name)+'</p><div class="actions import-slot-toolbar"><button type="button" class="small" id="loc-pick-all">เลือกทั้งหมด ('+entries.length+')</button><button type="button" class="small" id="loc-pick-reset">ล้างแถวที่ยังไม่ถ่าย</button></div><div class="location-picker-list">'+entries.map((e,i)=>'<label class="location-choice '+(e.checked?'selected':'')+' '+(e.locked?'locked':'')+'"><input type="checkbox" data-loc-idx="'+i+'" '+(e.checked?'checked':'')+' '+(e.locked?'disabled':'')+'><div><div class="location-choice-top"><b>'+esc([e.company,e.location].filter(Boolean).join(' · ')||'ไม่ระบุ Location')+'</b>'+stockStatusBadge(e.status)+(e.qty!==''?'<small class="scope-qty">Qty '+esc(e.qty)+'</small>':'')+'</div><small>'+(e.locked?'ถ่ายรูปหรือมีประวัติแล้ว (ล็อกไว้เพื่อไม่ให้รูปหาย)':e.job?'อยู่ในคิวถ่าย (รอถ่าย · เอาออกหรือสลับได้)':'ยังไม่ได้เลือกถ่าย · ติ๊กเพื่อเพิ่มหรือเปลี่ยนมาถ่ายโลนี้')+(e.live?'':' · สถานะ/Location เดิม (ไม่อยู่ในสต็อกล่าสุด)')+'</small></div></label>').join('')+'</div><p class="help">ถ้าเปลี่ยนใจจาก Location ที่ยังไม่ถ่ายไปโลอื่น ให้ติ๊กเอาโลเดิมออกแล้วติ๊กโลใหม่ ระบบจะอัปเดตให้ทั้งแอปและชีต Data ทันที</p></div><div class="modal-footer"><small>เลือก '+chosen.length+' / '+entries.length+' Location</small><div class="actions"><button type="button" id="loc-cancel">ยกเลิก</button><button type="button" class="primary" id="loc-save" '+(chosen.length?'':'disabled')+'>บันทึก '+chosen.length+' Location</button></div></div>');
+  $('#loc-cancel').onclick=closeModal;
+  $('#loc-pick-all').onclick=()=>{entries.forEach(e=>e.checked=true);renderBody();};
+  $('#loc-pick-reset').onclick=()=>{entries.forEach(e=>{if(!e.locked)e.checked=false;});renderBody();};
+  modalContent.querySelectorAll('[data-loc-idx]').forEach(cb=>cb.onchange=()=>{entries[Number(cb.dataset.locIdx)].checked=cb.checked;renderBody();});
+  $('#loc-save').onclick=()=>run(async()=>{
+   const selected=entries.filter(e=>e.checked).map(e=>({company:e.company,location:e.location,status:e.status,qty:e.qty}));
+   if(!selected.length)throw Error('กรุณาเลือกอย่างน้อย 1 Location');
+   await applyJobLocations(p,selected);
+  });
+ };
+ renderBody();
 }
 async function saveCloud(){if(current.demo)throw Error('ข้อมูลสมมติใช้ทดลองในเครื่องเท่านั้น กรุณานำเข้าสินค้าจริงเพื่อบันทึก');if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ในหน้าตั้งค่าก่อน');if(current.dirty||!current.baseRevision)assignPhotographer(current,currentPhotographer());await saveDraft();if(!current.fields?.photographer?.trim())throw Error('กรุณาระบุชื่อผู้ถ่ายก่อนบันทึก');const p=current;await photoUploads.get(p.id);await cloud.saveProduct(p,(message,percent)=>{busy(message+(Number.isFinite(percent)?' · '+percent+'%':''));uploadStatus(message,percent);});uploadStatus('บันทึกลง Google สำเร็จ',100);await reloadLocal();const next=nextPendingSibling(p);if(next){location.hash='product/'+next.id;toast('อัปโหลดและบันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}else{location.hash='products';toast('อัปโหลดและบันทึกสำเร็จ 100%');}await refreshCloud(true);}
 function updateSyncStatus(){
@@ -263,14 +324,36 @@ function mappingPreview(){
  const box=$('#import-code-check');box.className='import-code-check '+(state.checking?'checking':review.valid?'passed':'failed');
  box.innerHTML=state.checking?'<b>กำลังตรวจ Item code และ Location…</b><p>ตรวจจากชีตสต็อกล่าสุดและแตกงานตามสถานะก่อนนำเข้า</p>':!mapped?'<b>ไม่พบรายการสินค้า กรุณาตรวจไฟล์แล้วเลือกใหม่</b>':!review.readable?'<b>ยังตรวจสอบ Item code ไม่สำเร็จ</b><p>'+esc(state.checkError||review.warnings.join(' · ')||review.message)+'</p>':review.missing.length?'<b>กรุณาตรวจสอบ Item code · ไม่พบ '+review.missing.length+' รายการ</b><p>แก้รหัสในไฟล์ให้ตรงกับรหัสเต็มในสต็อก รวมตัวอักษรหรือรหัสสีท้าย Item code แล้วเลือกไฟล์ใหม่</p>':'<b>ตรวจพบ Item code ครบ '+result.products.length+' รายการ · แตกเป็น '+selectedJobs.length+' / '+review.expanded.length+' งานถ่าย</b><p>'+(review.noLocation.length?'พบรหัสแต่ยังไม่มี Location '+review.noLocation.length+' รายการ · ตรวจข้อมูลตำแหน่งในชีตสต็อก':'พร้อมนำเข้า · แยกตาม Company · Location · Inventory Status จากสต็อกล่าสุด')+'</p>';
  if(review.valid&&review.expanded.length){
-  $('#mapping-preview').innerHTML='<div class="preview-table import-stock-preview"><table><thead><tr><th style="width:36px"><input type="checkbox" id="import-select-all" aria-label="เลือกทุกงาน" '+(selectedJobs.length===review.expanded.length?'checked':'')+'></th><th>แถว</th><th>ITEM CODE</th><th>ชื่อสินค้า</th><th>บริษัท · Location</th><th>Inventory Status</th><th>Qty</th></tr></thead><tbody>'+review.expanded.map(p=>{const checked=!state.excludedSlots.has(p.stockKey);return '<tr class="'+(checked?'':'import-slot-excluded')+'"><td><input type="checkbox" data-slot-key="'+esc(p.stockKey)+'" '+(checked?'checked':'')+' aria-label="เลือก '+esc(p.code+' '+stockLabel(p))+'"></td><td>'+p.sourceRow+'</td><td class="code">'+esc(p.code)+'</td><td>'+esc(p.name)+'</td><td>'+(p.stockCompany||p.stockLocation?'<span class="stock-location">'+esc([p.stockCompany,p.stockLocation].filter(Boolean).join(' · '))+'</span>':'<span class="import-location-empty">ยังไม่มี Location</span>')+'</td><td>'+(stockStatusBadge(p.stockStatus)||'—')+'</td><td>'+esc(p.stockQty!==''&&p.stockQty!==undefined?p.stockQty:'—')+'</td></tr>';}).join('')+'</tbody></table></div>';
+  const statusCounts=new Map();
+  const byCodeCounts=new Map();
+  for(const p of review.expanded){
+   const st=normalizeInventoryStatus(p.stockStatus);
+   if(st)statusCounts.set(st,(statusCounts.get(st)||0)+1);
+   const ck=itemCodeKey(p.code),c=byCodeCounts.get(ck)||{total:0,selected:0};
+   c.total++;if(!state.excludedSlots.has(p.stockKey))c.selected++;
+   byCodeCounts.set(ck,c);
+  }
+  const skippedItems=[...byCodeCounts.values()].filter(c=>c.selected===0).length;
+  const toolbar='<div class="actions import-slot-toolbar"><button type="button" class="small" id="import-pick-all">เลือกทั้งหมด ('+review.expanded.length+')</button><button type="button" class="small" id="import-pick-none">ล้างทั้งหมด</button>'+[...statusCounts].map(([st,n])=>'<button type="button" class="small" data-pick-status="'+esc(st)+'">เฉพาะ '+esc(st)+' ('+n+')</button>').join('')+'</div>';
+  let prevCode='';
+  $('#mapping-preview').innerHTML=toolbar+'<div class="preview-table import-stock-preview"><table><thead><tr><th style="width:36px"><input type="checkbox" id="import-select-all" aria-label="เลือกทุกงาน" '+(selectedJobs.length===review.expanded.length?'checked':'')+'></th><th>แถว</th><th>ITEM CODE</th><th>ชื่อสินค้า</th><th>บริษัท · Location</th><th>Inventory Status</th><th>Qty</th></tr></thead><tbody>'+review.expanded.map(p=>{
+   const checked=!state.excludedSlots.has(p.stockKey),ck=itemCodeKey(p.code),isGroupStart=ck!==prevCode;prevCode=ck;
+   const cnt=byCodeCounts.get(ck),groupTag=isGroupStart&&cnt.total>1?'<span class="import-item-count '+(cnt.selected?'':'empty')+'">'+(cnt.selected?'เลือก '+cnt.selected+'/'+cnt.total:'ข้าม')+'</span>':'';
+   return '<tr class="'+(checked?'':'import-slot-excluded')+(isGroupStart?' import-group-start':'')+'"><td><input type="checkbox" data-slot-key="'+esc(p.stockKey)+'" '+(checked?'checked':'')+' aria-label="เลือก '+esc(p.code+' '+stockLabel(p))+'"></td><td>'+p.sourceRow+'</td><td class="code">'+esc(p.code)+groupTag+'</td><td>'+esc(p.name)+'</td><td>'+(p.stockCompany||p.stockLocation?'<span class="stock-location">'+esc([p.stockCompany,p.stockLocation].filter(Boolean).join(' · '))+'</span>':'<span class="import-location-empty">ยังไม่มี Location</span>')+'</td><td>'+(stockStatusBadge(p.stockStatus)||'—')+'</td><td>'+esc(p.stockQty!==''&&p.stockQty!==undefined?p.stockQty:'—')+'</td></tr>';
+  }).join('')+'</tbody></table></div>';
   const allBox=$('#import-select-all');
   if(allBox){allBox.indeterminate=selectedJobs.length>0&&selectedJobs.length<review.expanded.length;allBox.onchange=e=>{if(e.target.checked)state.excludedSlots.clear();else for(const p of review.expanded)state.excludedSlots.add(p.stockKey);mappingPreview();};}
+  $('#import-pick-all').onclick=()=>{state.excludedSlots.clear();mappingPreview();};
+  $('#import-pick-none').onclick=()=>{for(const p of review.expanded)state.excludedSlots.add(p.stockKey);mappingPreview();};
+  modalContent.querySelectorAll('[data-pick-status]').forEach(b=>b.onclick=()=>{const target=b.dataset.pickStatus;state.excludedSlots.clear();for(const p of review.expanded)if(normalizeInventoryStatus(p.stockStatus)!==target)state.excludedSlots.add(p.stockKey);mappingPreview();});
   modalContent.querySelectorAll('[data-slot-key]').forEach(cb=>cb.onchange=e=>{if(e.target.checked)state.excludedSlots.delete(cb.dataset.slotKey);else state.excludedSlots.add(cb.dataset.slotKey);mappingPreview();});
+  $('#import-summary').textContent='เลือก '+selectedJobs.length+' / '+review.expanded.length+' งานถ่าย (จาก '+result.products.length+' Item'+(skippedItems?' · ข้าม '+skippedItems+' Item':'')+')';
+  $('#confirm-import').innerHTML=icon('import')+'นำเข้า '+selectedJobs.length+' งานถ่าย';
  }else{
   $('#mapping-preview').innerHTML='<div class="preview-table import-stock-preview"><table><thead><tr><th>แถว</th><th>ITEM CODE</th><th>ชื่อสินค้า</th><th>ผลตรวจ / Location</th></tr></thead><tbody>'+review.items.map(p=>'<tr class="'+(p.status==='missing'?'import-code-missing':'')+'"><td>'+p.sourceRow+'</td><td class="code">'+esc(p.code)+'</td><td>'+esc(p.name)+'</td><td>'+(state.checking?'กำลังตรวจสอบ…':p.status==='missing'?'<strong class="import-code-error">กรุณาตรวจสอบ Item code</strong><small>ไม่พบรหัสนี้ในสต็อก</small>':p.status==='found'?(p.locations?.length?p.locations.map(value=>'<span class="stock-location">'+esc(value)+'</span>').join(''):'<span class="import-location-empty">พบ Item code · ยังไม่มี Location</span>'):'รอตรวจสอบ')+'</td></tr>').join('')+'</tbody></table></div>';
+  $('#import-summary').textContent='รายการ '+result.products.length+' · รหัสซ้ำในไฟล์ '+result.duplicates+' · ข้ามแถวไม่ครบ '+result.skipped;
+  $('#confirm-import').innerHTML=icon('import')+'นำเข้ารายการ';
  }
- $('#import-summary').textContent=(review.valid&&review.expanded.length?selectedJobs.length+' งานถ่าย (จาก '+result.products.length+' Item)':'รายการ '+result.products.length)+' · รหัสซ้ำในไฟล์ '+result.duplicates+' · ข้ามแถวไม่ครบ '+result.skipped;
  $('#confirm-import').disabled=!mapped||state.checking||!review.valid||(review.expanded.length>0&&!selectedJobs.length);
  $('#recheck-import-codes').disabled=!mapped||state.checking;
 }
@@ -359,7 +442,7 @@ function openReportPicker(only){
   const ids=[...modal.querySelectorAll('[data-report-id]:checked')].map(x=>x.dataset.reportId),chosen=eligible.filter(p=>(!$('#report-batch').value||p.importId===$('#report-batch').value)&&ids.includes(p.id));if(!chosen.length)throw Error('เลือกอย่างน้อย 1 รายการ');
   if(chosen.length>10)throw Error('เลือกครั้งละไม่เกิน 10 รายการ');
   modal.querySelectorAll('.report-steps li').forEach((step,i)=>{step.classList.toggle('active',i===1);if(i===0)step.textContent='✓ เลือกรายการ';});$('#make-pdf').disabled=true;$('#make-pdf').insertAdjacentHTML('beforebegin','<div id="pdf-progress" role="status" aria-live="polite"></div>');clearReport();const results=[],usedNames=new Set();let failure='';
-  try{const {createPhotoReport}=await import('./pdf.mjs?v=20261120stockstatus');
+  try{const {createPhotoReport}=await import('./pdf.mjs?v=20261120locations');
    for(const [i,p] of chosen.entries()){
     busy('กำลังสร้าง PDF · '+Math.floor(i/chosen.length*100)+'% · '+p.code);
     const report=await createPhotoReport([p],photoUrl,(message,percent)=>busy('สร้าง PDF '+Math.min(99,Math.floor((i+percent/100)/chosen.length*100))+'% · '+p.code+' · '+message));
@@ -409,7 +492,8 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)autoSync()
 async function hydrateListPhotos(){for(const img of main.querySelectorAll('[data-list-product]')){const p=products.find(p=>p.id===img.dataset.listProduct),photo=p?.photos?.top?.[0];if(!photo)continue;try{const url=await photoUrl(photo);if(img.isConnected&&url)img.src=url;}catch{if(img.isConnected)img.alt='โหลดภาพไม่สำเร็จ';}}}
 
 function renderSaveBar(){
- main.insertAdjacentHTML('beforeend','<div class="save-dock"><div class="dock-info"><b>ฉบับร่างบันทึกอัตโนมัติ</b><small>จำชื่อผู้ถ่ายในเครื่องนี้จนกว่าจะเปลี่ยนเอง</small></div><label class="field dock-photographer">ชื่อผู้ถ่าย *'+choiceControl('photographer',currentPhotographer())+'</label><button class="primary" id="save-cloud">'+icon('cloud')+'บันทึกลง Google</button></div>');
+ const snapScope=hasStockScope(current)?'<span class="save-dock-scope">บันทึกคู่กับ: '+stockStatusBadge(current.stockStatus)+' '+esc([current.stockCompany,current.stockLocation].filter(Boolean).join(' · '))+'</span>':'';
+ main.insertAdjacentHTML('beforeend','<div class="save-dock"><div class="dock-info"><b>ฉบับร่างบันทึกอัตโนมัติ</b>'+snapScope+'<small>จำชื่อผู้ถ่ายในเครื่องนี้จนกว่าจะเปลี่ยนเอง · เก็บ Location และสถานะ ณ เวลาบันทึก</small></div><label class="field dock-photographer">ชื่อผู้ถ่าย *'+choiceControl('photographer',currentPhotographer())+'</label><button class="primary" id="save-cloud">'+icon('cloud')+'บันทึกลง Google</button></div>');
  const p=current;$('#photographer').onchange=event=>changePhotographer(p,event.target.value).catch(e=>toast(e.message,true));
  bindChoices();$('#save-cloud').onclick=()=>run(saveCloud);
 }

@@ -290,3 +290,6 @@ dialog:has(.import-review) {
   .job-status { grid-column: 2; }
   #modal-content:has(.import-review) .modal-footer { gap: 8px; flex-wrap: wrap; padding: 10px 14px; }
 }
+
+.badge.closed-job{background:var(--fill);color:var(--muted);border:1px solid var(--line)}
+.stock-table .job-close{margin:3px 0}.product-row-actions{flex-wrap:wrap}

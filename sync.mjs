@@ -24,6 +24,7 @@ export function hasLocalEdits(local,remote,revisions=[]){
 }
 export function reconcileProduct(local,remote,revisions=[]){
  if(!local)return remote;
+ if(remote.closed!==undefined)local={...local,closed:remote.closed};
  // A response started before a save must not roll that newer save back.
  if(local.sheetId&&local.sheetId!==remote.sheetId)throw Error('ข้อมูลในเครื่องมาจากคนละชีต กรุณาตรวจการเชื่อมต่อ');
  if((Date.parse(local.syncedAt)||0)>(Date.parse(remote.syncedAt)||0))return local;

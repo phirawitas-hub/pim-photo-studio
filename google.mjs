@@ -66,7 +66,8 @@ export async function selectRevision(p,revisionId){assertSheet(p);const r=await 
 export function applyRevision(p,rev,history){const meta=rev?JSON.parse(rev[4]||'{}'):{};p.fields=meta.fields||{};p.dimensions=meta.dimensions||{};p.photos=rev?JSON.parse(rev[5]||'{}'):{};p.stockSnapshot=meta.stockSnapshot||null;if(p.stockSnapshot&&!p.stockCompany&&!p.stockLocation&&!p.stockStatus){p.stockCompany=p.stockSnapshot.company||'';p.stockLocation=p.stockSnapshot.location||'';p.stockStatus=normalizeInventoryStatus(p.stockSnapshot.status||'');p.stockQty=p.stockSnapshot.qty??'';}p.baseRevision=rev?.[0]||null;p.itemHead=history.at(-1)?.[0]||null;p.revisionNumber=rev?(meta.revisionNumber||history.findIndex(r=>r[0]===rev[0])+1):0;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.syncedAt=rev?.[2]||null;p.sheetId=config.sheetId;}
 export async function loadProducts(snapshot){
  const data=snapshot||await rpc('snapshot');if(!['imports','products','revisions','selections'].every(k=>Array.isArray(data?.[k])))throw Error('ข้อมูลจากชีตไม่ครบ กรุณารีเฟรชอีกครั้ง');const completed=new Set(data.imports.map(r=>r[0])),rows=data.products.filter(r=>completed.has(r[4])),revisions=data.revisions,selections=data.selections;
- const mapped=rows.map(r=>({id:r[0],code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7],stockCompany:String(r[8]||'').trim().toUpperCase(),stockLocation:String(r[9]||'').trim(),stockStatus:normalizeInventoryStatus(r[10]||''),stockQty:r[11]??''}));
+ const closedIds=new Set((data.closedJobs||[]).map(row=>row[0]));
+ const mapped=rows.map(r=>({id:r[0],closed:closedIds.has(r[0]),code:r[1],name:r[2],purpose:r[3],importId:r[4],sourceSheet:r[5],sourceRow:r[6],createdAt:r[7],stockCompany:String(r[8]||'').trim().toUpperCase(),stockLocation:String(r[9]||'').trim(),stockStatus:normalizeInventoryStatus(r[10]||''),stockQty:r[11]??''}));
  return mapped.map(p=>{const scope=productScopeKey(p),ids=new Set(mapped.filter(x=>productScopeKey(x)===scope).map(x=>x.id)),history=revisions.filter(x=>ids.has(x[1])),selection=selections.filter(x=>x[0]===p.id).at(-1),rev=selection?history.find(x=>x[0]===selection[1]):history.filter(x=>x[1]===p.id).at(-1);applyRevision(p,rev,history);p.syncedAt=selection?.[2]||p.syncedAt;p.importSynced=true;return p;});
 }
 export async function photoBlob(fileId){const r=await rpc('photo',{fileId});return new Blob([Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0))],{type:r.mime});}
@@ -76,6 +77,7 @@ export const changeOption=(kind,value,operation)=>rpc('option',{kind,value,opera
 
 export const snapshot=()=>rpc('snapshot');
 export const splitPendingStock=()=>rpc('splitPendingStock');
+export const setJobClosed=payload=>rpc('setJobClosed',payload);
 export const updateJobLocations=payload=>rpc('updateJobLocations',payload);
 export const saveBranding=brand=>rpc('branding',brand);
 

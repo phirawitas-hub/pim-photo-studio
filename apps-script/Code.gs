@@ -1,6 +1,7 @@
 // PIM Photo Studio. Execute as owner; link-access deployment is a shared workspace.
 // Built-in Apps Script services only; no API key, Client ID, or Advanced Services.
 const PIM_SCHEMA = {
+  PIM_ClosedJobs:['Product ID','Closed At'],
   PIM_Deletions:['Import ID','Deleted At','File Name','Plan JSON','Status'],
   PIM_Branding:['Key','Value'],
   PIM_Options:['Kind','Value','Active'],
@@ -40,7 +41,7 @@ function pimCall(request) {
   if(!request || typeof request!=='object' || Array.isArray(request))throw Error('คำขอไม่ถูกต้อง');
   if(request.sheetId && request.sheetId!==sheetId)throw Error('แอปนี้ใช้งานได้เฉพาะชีต PIM ที่กำหนดไว้');
   request={...request,sheetId};
-  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','validateItems','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport','splitPendingStock','updateJobLocations'];
+  const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','validateItems','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport','splitPendingStock','updateJobLocations','setJobClosed'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
   const readOnly=['hello','read','stock','validateItems','itemHistory','photo','snapshot','workspace'].includes(request.action);
   const lock=readOnly?null:LockService.getScriptLock();
@@ -51,7 +52,7 @@ function pimCall(request) {
     if (request.action==='hello') return {title:ss.getName(),sheetId:ss.getId()};
     if (request.action==='read') return table_(ss,p.name);
     if (request.action==='workspace') return workspace_(ss);
-    if (request.action==='snapshot') return Object.assign(workspace_(ss),{products:table_(ss,'PIM_Products'),revisions:table_(ss,'PIM_Revisions'),selections:table_(ss,'PIM_Selections')});
+    if (request.action==='snapshot') return Object.assign(workspace_(ss),{closedJobs:table_(ss,'PIM_ClosedJobs'),products:table_(ss,'PIM_Products'),revisions:table_(ss,'PIM_Revisions'),selections:table_(ss,'PIM_Selections')});
     if (request.action==='stock') return stock_(ss,p.code);
     if (request.action==='validateItems') return validateItems_(ss,p.codes);
     if (request.action==='itemHistory') return itemHistory_(ss,p);
@@ -59,8 +60,10 @@ function pimCall(request) {
     if(request.action==='deletePreview')return deletePreview_(ss,p);
     schema_(ss);
     if(request.action!=='deleteImport')assertActiveImport_(ss,request.action,p);
+    if(p.productId&&['revision','upload','selectRevision'].includes(request.action)&&table_(ss,'PIM_ClosedJobs').some(r=>r[0]===p.productId))throw Error('งาน Location นี้ปิดแล้ว กรุณากลับรายการสินค้าแล้วรีเฟรช');
     switch(request.action) {
       case 'deleteImport':return deleteImport_(ss,p);
+      case 'setJobClosed':return setJobClosed_(ss,p);
       case 'splitPendingStock': return splitPendingStock_(ss);
       case 'updateJobLocations': return updateJobLocations_(ss,p);
       case 'branding': return saveBranding_(ss,p);
@@ -418,7 +421,7 @@ function splitPendingStock_(ss){
  const prodSheet=ss.getSheetByName('PIM_Products');
  if(!prodSheet||prodSheet.getLastRow()<2)return {split:0,created:0,updated:0};
  const doneImports=new Set(table_(ss,'PIM_Imports').map(r=>r[0]));
- const lockedIds=new Set([...table_(ss,'PIM_Revisions').map(r=>r[1]),...table_(ss,'PIM_Selections').map(r=>r[0]),...table_(ss,'PIM_Files').filter(r=>r[2]==='photo').map(r=>r[3])]);
+ const lockedIds=new Set([...table_(ss,'PIM_ClosedJobs').map(r=>r[0]),...table_(ss,'PIM_Revisions').map(r=>r[1]),...table_(ss,'PIM_Selections').map(r=>r[0]),...table_(ss,'PIM_Files').filter(r=>r[2]==='photo').map(r=>r[3])]);
  const cols=typeof prodSheet.getLastColumn==='function'?Math.min(Math.max(1,prodSheet.getLastColumn()),PIM_SCHEMA.PIM_Products.length):PIM_SCHEMA.PIM_Products.length;
  const rawRows=prodSheet.getRange(2,1,prodSheet.getLastRow()-1,cols).getDisplayValues().map(r=>cols===PIM_SCHEMA.PIM_Products.length?r:[...r,...Array(PIM_SCHEMA.PIM_Products.length-cols).fill('')]);
  const existingSlots=new Map();
@@ -472,6 +475,16 @@ function splitPendingStock_(ss){
 function splitPendingStockNow(){
  return pimCall({action:'splitPendingStock'});
 }
+function setJobClosed_(ss,p){
+ const id=id_(p.productId);
+ const job=table_(ss,'PIM_Products').find(r=>r[0]===id);
+ if(!job||job[4]!==p.importId||stockSlotKey_(job[8],job[9],job[10])!==p.slotKey)throw Error('งานหรือ Location เปลี่ยนแล้ว กรุณารีเฟรชรายการ');
+ if(typeof p.closed!=='boolean')throw Error('สถานะงานไม่ถูกต้อง');
+ const existing=table_(ss,'PIM_ClosedJobs').find(r=>r[0]===id);
+ if(p.closed&&!existing)append_(ss,'PIM_ClosedJobs',[[id,new Date().toISOString()]]);
+ if(!p.closed&&existing)removeRows_(ss,'PIM_ClosedJobs',r=>r[0]===id);
+ return {productId:id,closed:p.closed};
+}
 function updateJobLocations_(ss,p){
  id_(p.importId);
  const codeKey=itemKey_(p.code);
@@ -492,7 +505,7 @@ function updateJobLocations_(ss,p){
  const desired=stockSlots_(p.slots);
  if(!desired.length)throw Error('กรุณาเลือกอย่างน้อย 1 Location');
  const desiredMap=new Map(desired.map(s=>[s.slotKey,s]));
- const lockedIds=new Set([...table_(ss,'PIM_Revisions').map(r=>r[1]),...table_(ss,'PIM_Selections').map(r=>r[0]),...table_(ss,'PIM_Files').filter(r=>r[2]==='photo').map(r=>r[3])]);
+ const lockedIds=new Set([...table_(ss,'PIM_ClosedJobs').map(r=>r[0]),...table_(ss,'PIM_Revisions').map(r=>r[1]),...table_(ss,'PIM_Selections').map(r=>r[0]),...table_(ss,'PIM_Files').filter(r=>r[2]==='photo').map(r=>r[3])]);
  const kept=[],removable=[],satisfied=new Set();
  for(const item of existing){
   const isLocked=lockedIds.has(item.id);
@@ -635,6 +648,6 @@ function deleteImport_(ss,p){
  for(const fileId of plan.trash){const file=DriveApp.getFileById(fileId);if(!file.isTrashed())file.setTrashed(true);}
  const ids=new Set(plan.productIds),revs=new Set(plan.revisionIds),files=new Set(plan.trash);
  const data=ss.getSheetByName('Data');if(data&&data.getLastRow()){const h=data.getRange(1,1,1,data.getLastColumn()).getDisplayValues()[0],id=h.indexOf('PIM Product ID'),batch=h.indexOf('Import ID');if(id<0&&batch<0)throw Error('Data ไม่มีคอลัมน์ระบุงาน จึงยังไม่ลบข้อมูล');removeRows_(ss,'Data',r=>ids.has(r[id])||r[batch]===p.batchId);}
- removeRows_(ss,'PIM_Selections',r=>ids.has(r[0]));removeRows_(ss,'PIM_Revisions',r=>revs.has(r[0]));removeRows_(ss,'PIM_Files',r=>files.has(r[1]));removeRows_(ss,'PIM_Source',r=>r[0]===p.batchId);removeRows_(ss,'PIM_Products',r=>ids.has(r[0]));removeRows_(ss,'PIM_Imports',r=>r[0]===p.batchId);
+ removeRows_(ss,'PIM_ClosedJobs',r=>ids.has(r[0]));removeRows_(ss,'PIM_Selections',r=>ids.has(r[0]));removeRows_(ss,'PIM_Revisions',r=>revs.has(r[0]));removeRows_(ss,'PIM_Files',r=>files.has(r[1]));removeRows_(ss,'PIM_Source',r=>r[0]===p.batchId);removeRows_(ss,'PIM_Products',r=>ids.has(r[0]));removeRows_(ss,'PIM_Imports',r=>r[0]===p.batchId);
  const journal=ss.getSheetByName('PIM_Deletions'),i=table_(ss,'PIM_Deletions').findIndex(r=>r[0]===p.batchId);journal.getRange(i+2,4,1,2).setValues([['{}','complete']]);delete PIM_TABLE_CACHE.PIM_Deletions;SpreadsheetApp.flush();return {deleted:true,batchId:p.batchId,files:plan.trash.length,shared:plan.fileMoves.length};
 }

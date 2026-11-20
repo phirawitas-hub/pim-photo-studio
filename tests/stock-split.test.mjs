@@ -439,3 +439,19 @@ test('updateJobLocations swaps unphotographed locations in place, adds/removes u
  assert.equal(sheets.get('Data').rows.length,3);
  assert.equal(sheets.get('Data').rows[2][5],'B-HELMET-04-02');
 });
+
+test('ปิดและเปิดงานเฉพาะ Location ซ้ำได้โดยรักษารูปและงานข้างเคียง',()=>{
+ const rows=[['job-a','800353','','','batch','','','','VP','A','Damage'],['job-b','800353','','','batch','','','','VP','B','Damage']];
+ const closed=[];
+ const ctx=vm.createContext({});
+ vm.runInContext(backendCode,ctx);
+ ctx.table_=(_,name)=>name==='PIM_ClosedJobs'?closed:rows;
+ ctx.append_=(_,name,added)=>{assert.equal(name,'PIM_ClosedJobs');closed.push(...added);};
+ ctx.removeRows_=(_,name,match)=>{assert.equal(name,'PIM_ClosedJobs');closed.splice(closed.findIndex(match),1);};
+ const change={productId:'job-a',importId:'batch',slotKey:stockSlotKey('VP','A','Damage'),closed:true};
+ ctx.setJobClosed_({},change);ctx.setJobClosed_({},change);
+ assert.deepEqual(closed.map(r=>r[0]),['job-a']);
+ assert.throws(()=>ctx.setJobClosed_({},{...change,slotKey:stockSlotKey('VP','B','Damage')}));
+ ctx.setJobClosed_({},{...change,closed:false});ctx.setJobClosed_({},{...change,closed:false});
+ assert.equal(closed.length,0);assert.equal(rows.length,2);
+});

@@ -12,7 +12,7 @@ export const MAX_PHOTOS=5;
 export const uid=()=>crypto.randomUUID();
 export function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 export function progress(p){const groups=p.photos||{};return {required:ANGLES.filter(a=>a.required&&groups[a.id]?.length).length,total:ANGLES.reduce((n,a)=>n+(groups[a.id]?.length||0),0)};}
-export function status(p){const n=progress(p);return n.required===7?'complete':n.total?'progress':'waiting';}
+export function status(p){if(p.closed)return 'closed';const n=progress(p);return n.required===7?'complete':n.total?'progress':'waiting';}
 export function validatePhotos(p){for(const a of ANGLES){if((p.photos?.[a.id]?.length||0)>MAX_PHOTOS)throw Error(a.name+' เพิ่มได้ไม่เกิน 5 รูป');}return ANGLES.filter(a=>a.required&&!p.photos?.[a.id]?.length).map(a=>a.name);}
 export function validatePhotoFile(file){if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw Error('รองรับรูป JPG, PNG และ WebP เท่านั้น');if(file.size>20*1024*1024)throw Error('รูปต้องมีขนาดไม่เกิน 20 MB');if(!file.size)throw Error('ไฟล์รูปว่างเปล่า');}
 export function normalizeHeader(v){return String(v??'').toLowerCase().replace(/[\s_\-().:]/g,'');}

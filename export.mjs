@@ -1,8 +1,9 @@
 import {ANGLES,MAX_PHOTOS,progress,status} from './core.mjs';
+const importDateFormatter=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'});
 export function importDay(product,batches=[]){
  const value=batches.find(b=>b.id===product.importId)?.createdAt||product.createdAt;
  if(!value)return '';const date=new Date(value);if(Number.isNaN(date.getTime()))return '';
- const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
+ const parts=importDateFormatter.formatToParts(date);
  const get=k=>parts.find(p=>p.type===k).value;return get('year')+'-'+get('month')+'-'+get('day');
 }
 export function inImportRange(p,batches,from='',to=''){const day=importDay(p,batches);return (!from&&!to)||!!day&&(!from||day>=from)&&(!to||day<=to);}

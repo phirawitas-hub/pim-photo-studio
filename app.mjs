@@ -3,7 +3,7 @@ import {itemCodeKey,stockSlotKey,hasStockScope,stockLabel,normalizeInventoryStat
 import {selectImportSheet} from './importer.mjs?v=20261109simple';
 import {openNativeCamera,cancelNativeCamera,isMobileCameraDevice} from './camera.mjs?v=20261109native';
 import {requesterRanking} from './insights.mjs';
-import {csvRows,encodeCSV,sourceWorkbooks,inImportRange,newestImports,productsByImportDate} from './export.mjs?v=20261120locations';
+import {csvRows,encodeCSV,sourceWorkbooks,importDay,newestImports,productsByImportDate} from './export.mjs?v=20261120locations';
 import {initTheme} from './theme.mjs?v=20261103clean';
 initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
@@ -17,6 +17,10 @@ const paths={grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',camera
 function icon(name){return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.box}"/></svg>`;}
 document.querySelectorAll('[data-icon]').forEach(el=>el.innerHTML=icon(el.dataset.icon));
 let products=[],batches=[],settings={id:'config',scriptUrl:'',sheetId:''},filter='all',query='',batchFilter='',stockStatusFilter='',importFrom='',importTo='',page=1,current=null,section='gallery',importState=null,working=false;
+let boardScope='today',renderedBoardDay='';
+const boardLanes=[['waiting','รอถ่าย'],['progress','กำลังถ่าย'],['complete','ถ่ายครบแล้ว'],['closed','ปิดงานแล้ว']];
+function pendingJob(p){const state=status(p);return !p.demo&&(state==='waiting'||state==='progress');}
+function todayInBangkok(){return importDay({createdAt:new Date()});}
 let rankingMetric='items';
 let summaryFilter={file:'',requester:'',status:'',from:'',to:'',date:'import'};
 let brand={name:'PIM.',subtitle:'PHOTO STUDIO',logo:new URL('./assets/pim-logo.webp',import.meta.url).href};
@@ -84,25 +88,42 @@ async function signIn(usePopup=true){cloud.disconnect();busy('กำลังเ
 async function reloadLocal(){products=await db.all('products');batches=newestImports(await db.all('imports'));}
 async function route(){cancelNativeCamera();await reloadLocal();const r=location.hash.slice(1).split('/');document.body.dataset.page=r[0]||'products';if(r[0]!=='product')current=null;document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===(r[0]==='product'?'products':r[0]||'products')));document.querySelectorAll('.nav-group').forEach(g=>{if(g.querySelector('a.active'))g.open=true;});if(r[0]==='product'){current=products.find(p=>p.id===r[1]);section=r[2]||'gallery';if(!current){location.hash='products';toast('ไม่พบสินค้า',true);return;}renderDetail();}else if(r[0]==='summary')renderSummary();else if(r[0]==='imports')renderImports();else if(r[0]==='settings')renderSettings();else renderProducts();updatePageHeading();updateConnection();}
 window.addEventListener('hashchange',()=>route().catch(e=>toast(e.message,true)));
-function stats(){const counts={waiting:0,progress:0,complete:0,closed:0};products.forEach(p=>counts[status(p)]++);return `<div class="stats">${[['สินค้าทั้งหมด',products.length,'box'],['รอถ่ายรูป',counts.waiting,'clock'],['กำลังดำเนินการ',counts.progress,'camera'],['ถ่ายครบแล้ว',counts.complete,'check']].map(([label,n,i])=>`<div class="stat"><div><small>${label}</small><strong>${n.toLocaleString()}</strong></div><span class="stat-icon">${icon(i)}</span></div>`).join('')}</div>`;}
 function renderProducts(){
  const invStatuses=stockStatusOptions();
- main.innerHTML=`<div class="queue-layout"><section class="queue-pane"><header class="queue-title"><h1>งานถ่าย</h1><div class="queue-title-actions"><details class="queue-menu"><summary aria-label="เมนูนำเข้าและส่งออก">ไฟล์</summary><div class="queue-commands"><button class="primary" id="import">${icon('import')}นำเข้าไฟล์</button><button id="export-pdf">${icon('file')}ส่งออก PDF</button><button id="export-excel">Excel</button><button id="export">CSV</button></div></details><button class="small" id="refresh" aria-label="รีเฟรชจากชีต">${icon('refresh')} รีเฟรช</button></div></header>
- <div class="queue-tools"><label class="search">${icon('search')}<input id="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหารหัสสินค้า ชื่อ หรือ Location" value="${esc(query)}"></label><button id="filters-toggle" aria-controls="queue-filters" aria-expanded="false">ตัวกรอง</button></div>
- <div class="tabs" aria-label="กรองสถานะ">${[['all','ทั้งหมด'],['waiting','รอถ่าย'],['progress','กำลังถ่าย'],['complete','ถ่ายครบ'],['closed','ปิดงาน']].map(([id,label])=>`<button data-filter="${id}" class="${filter===id?'active':''}">${label} <span>${id==='all'?products.length:products.filter(p=>status(p)===id).length}</span></button>`).join('')}</div><div id="queue-filters" class="toolbar product-filters" hidden><label class="field">ไฟล์นำเข้า<select id="batch-filter" aria-label="กรองไฟล์นำเข้า"><option value="">ไฟล์นำเข้าทั้งหมด</option>${batches.map(b=>`<option value="${b.id}" ${batchFilter===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label><label class="field">Inventory Status<select id="stock-status-filter" aria-label="กรองสถานะสินค้า"><option value="">ทุกสถานะสินค้า</option>${invStatuses.map(v=>`<option value="${esc(v)}" ${stockStatusFilter===v?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label class="field">วันที่อัปโหลด · จาก<input type="date" id="import-from" aria-label="วันที่อัปโหลดเริ่มต้น" value="${esc(importFrom)}" max="${esc(importTo)}"></label><label class="field">ถึงวันที่<input type="date" id="import-to" aria-label="วันที่อัปโหลดสิ้นสุด" value="${esc(importTo)}" min="${esc(importFrom)}"></label><button id="reset-product-filters" class="filter-reset">ล้างตัวกรอง</button><button id="delete-filter-batch" class="danger" ${batchFilter?'':'disabled'}>ลบไฟล์นี้</button></div><p id="filter-summary" class="filter-summary"></p><div id="table-area"></div><div id="sync-status" class="sync-status" role="status" aria-live="polite"></div></section><aside id="job-inspector" aria-label="รายละเอียดงานที่เลือก"></aside></div>`;
+ main.innerHTML=`<section class="queue-pane board-pane"><header class="queue-title"><div><h1>บอร์ดงานถ่าย</h1><p id="board-date"></p></div><div class="queue-title-actions"><details class="queue-menu"><summary aria-label="เมนูนำเข้าและส่งออก">ไฟล์</summary><div class="queue-commands"><button class="primary" id="import">${icon('import')}นำเข้าไฟล์</button><button id="export-pdf">${icon('file')}ส่งออก PDF</button><button id="export-excel">Excel</button><button id="export">CSV</button></div></details><button class="small" id="refresh" aria-label="รีเฟรชจากชีต">${icon('refresh')} รีเฟรช</button></div></header>
+ <div class="board-scopes" role="group" aria-label="ช่วงเวลาของงานถ่าย"><div class="board-segment"><button data-scope="today">วันนี้</button><button data-scope="all">ทุกวัน</button></div><button data-scope="backlog" class="board-backlog">${icon('clock')} งานค้างทุกวัน <b id="backlog-count"></b></button></div><div class="queue-tools"><label class="search">${icon('search')}<input id="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหารหัสสินค้า ชื่อ หรือ Location" value="${esc(query)}"></label><button id="filters-toggle" aria-controls="queue-filters" aria-expanded="false">ตัวกรอง</button></div>
+ <div id="queue-filters" class="toolbar product-filters" hidden><label class="field">สถานะงานถ่าย<select id="job-status-filter"><option value="all">ทุกสถานะงาน</option>${boardLanes.map(([id,label])=>`<option value="${id}" ${id===filter?'selected':''}>${label}</option>`).join('')}</select></label><label class="field">ไฟล์นำเข้า<select id="batch-filter" aria-label="กรองไฟล์นำเข้า"><option value="">ไฟล์นำเข้าทั้งหมด</option>${batches.map(b=>`<option value="${b.id}" ${batchFilter===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select></label><label class="field">Inventory Status<select id="stock-status-filter" aria-label="กรองสถานะสินค้า"><option value="">ทุกสถานะสินค้า</option>${invStatuses.map(v=>`<option value="${esc(v)}" ${stockStatusFilter===v?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label class="field">วันที่อัปโหลด · จาก<input type="date" id="import-from" aria-label="วันที่อัปโหลดเริ่มต้น" value="${esc(importFrom)}" max="${esc(importTo)}"></label><label class="field">ถึงวันที่<input type="date" id="import-to" aria-label="วันที่อัปโหลดสิ้นสุด" value="${esc(importTo)}" min="${esc(importFrom)}"></label><button id="reset-product-filters" class="filter-reset">ล้างตัวกรอง</button><button id="delete-filter-batch" class="danger" ${batchFilter?'':'disabled'}>ลบไฟล์นี้</button></div><p id="filter-summary" class="filter-summary"></p><div id="table-area"></div><div id="sync-status" class="sync-status" role="status" aria-live="polite"></div></section>`;
  const advanced=$('#queue-filters'),toggle=$('#filters-toggle');
  function showFilters(show){advanced.hidden=!show;toggle.setAttribute('aria-expanded',String(show));}
- showFilters(Boolean(batchFilter||stockStatusFilter||importFrom||importTo));
+ showFilters(Boolean(filter!=='all'||batchFilter||stockStatusFilter||importFrom||importTo));
  toggle.onclick=()=>showFilters(advanced.hidden);
  $('#delete-filter-batch').onclick=()=>openDeleteImport(batchFilter);$('#reset-product-filters').onclick=()=>{query='';batchFilter='';stockStatusFilter='';importFrom='';importTo='';filter='all';page=1;renderProducts();};$('#import').onclick=openImport;$('#export').onclick=()=>run(()=>exportCSV());$('#export-excel').onclick=()=>run(()=>exportCSV('xlsx'));$('#export-pdf').onclick=()=>openReportPicker();$('#refresh').onclick=()=>run(()=>refreshCloud(false,busy));
  main.querySelector('.queue-commands').addEventListener('click',()=>main.querySelector('.queue-menu').open=false);
  $('#search').oninput=e=>{query=e.target.value;page=1;renderTable();};
- $('#batch-filter').onchange=e=>{batchFilter=e.target.value;page=1;$('#delete-filter-batch').disabled=!batchFilter;renderTable();};
+ $('#batch-filter').onchange=e=>{batchFilter=e.target.value;if(batchFilter&&boardScope==='today')boardScope='all';page=1;$('#delete-filter-batch').disabled=!batchFilter;renderTable();};
  $('#stock-status-filter').onchange=e=>{stockStatusFilter=e.target.value;page=1;renderTable();};
- for(const [id,isFrom] of [['import-from',true],['import-to',false]])$('#'+id).onchange=e=>{const value=e.target.value;if(isFrom)importFrom=value;else importTo=value;$('#import-from').max=importTo;$('#import-to').min=importFrom;page=1;renderTable();};
- main.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;page=1;renderProducts();});renderTable();updateSyncStatus();
+ for(const [id,isFrom] of [['import-from',true],['import-to',false]])$('#'+id).onchange=e=>{const value=e.target.value;if(value&&boardScope==='today')boardScope='all';if(isFrom)importFrom=value;else importTo=value;$('#import-from').max=importTo;$('#import-to').min=importFrom;page=1;renderTable();};
+ $('#job-status-filter').onchange=e=>{filter=e.target.value;page=1;renderTable();};
+ main.querySelectorAll('[data-scope]').forEach(b=>b.onclick=()=>{
+  boardScope=b.dataset.scope;filter='all';query='';batchFilter='';stockStatusFilter='';importFrom='';importTo='';page=1;
+  renderProducts();main.querySelector('[data-scope="'+boardScope+'"]').focus({preventScroll:true});
+ });
+ renderTable();updateSyncStatus();
 }
-function filteredProducts(){return products.filter(p=>(filter==='all'||status(p)===filter)&&(!batchFilter||p.importId===batchFilter)&&(!stockStatusFilter||normalizeInventoryStatus(p.stockStatus)===stockStatusFilter)&&(!query||(p.code+' '+p.name+' '+(p.stockCompany||'')+' '+(p.stockLocation||'')+' '+(p.stockStatus||'')).toLowerCase().includes(query.toLowerCase()))&&inImportRange(p,batches,importFrom,importTo));}
+function filteredProducts(today=todayInBangkok()){
+ const from=boardScope==='today'?today:importFrom,to=boardScope==='today'?today:importTo;
+ const batchDays=new Map((from||to?batches:[]).map(b=>[b.id,importDay(b)]));
+ function matchesDate(p){
+  if(!from&&!to)return true;
+  const day=batchDays.get(p.importId)||importDay(p);
+  return day&&(!from||day>=from)&&(!to||day<=to);
+ }
+ return products.filter(p=>!p.demo&&(boardScope!=='backlog'||pendingJob(p))&&
+  (filter==='all'||status(p)===filter)&&(!batchFilter||p.importId===batchFilter)&&
+  (!stockStatusFilter||normalizeInventoryStatus(p.stockStatus)===stockStatusFilter)&&
+  (!query||[p.code,p.name,p.stockCompany,p.stockLocation,p.stockStatus].join(' ').toLowerCase().includes(query.toLowerCase()))&&
+  matchesDate(p));
+}
 function jobCloseButton(p){
  if(!p||p.demo||!p.importSynced||status(p)==='complete')return '';
  return '<button type="button" class="small job-close" data-job-close="'+esc(p.id)+'">'+(p.closed?'เปิดงานอีกครั้ง':'ปิดงาน')+'</button>';
@@ -131,32 +152,42 @@ function bindJobClose(container){
  });
 }
 function coverPhoto(product){return product.photos?.top?.[0]||ANGLES.map(a=>product.photos?.[a.id]?.[0]).find(Boolean);}
-let inspectedId='';
 function queueActions(p){
  const n=progress(p);
  return `<div class="queue-actions">${n.total?`<button data-view="${esc(p.id)}">${icon('image')}ดูรูป</button><button data-product-pdf="${esc(p.id)}">${icon('file')}ดาวน์โหลด PDF</button>`:''}<button class="primary" data-open="${esc(p.id)}">${icon('camera')}${p.closed?'รายละเอียด':n.total?'จัดการรูป':'เริ่มถ่าย'}</button>${jobCloseButton(p)}</div>`;
 }
-function queueRow(p){
+function boardCard(p){
  const n=progress(p),id=esc(p.id);
- return `<article class="studio-job" data-job="${id}"><a class="queue-link" href="#product/${id}" data-inspect="${id}"><div class="row-title"><strong>${esc(p.code)}</strong><span aria-hidden="true">›</span></div><div class="queue-name">${esc(p.name)}</div>${listMetadata(p)}<div class="queue-state">${badge(p)}<small>${n.required}/7 มุม · ${n.total} รูป</small></div>${coverPhoto(p)?`<span class="list-photo">${icon('image')}<img data-list-product="${id}" alt="ภาพสินค้า" loading="lazy"></span>`:''}</a>${p.dirty?'<small class="draft-indicator">ฉบับร่างในเครื่อง · ยังไม่บันทึก</small>':''}${p.remoteUpdate?`<button data-cloud-view="${id}">ดูรูปจากชีตที่อัปเดต</button>`:''}<div class="compact-actions">${queueActions(p)}</div></article>`;
-}
-function inspectJob(p){
- const host=$('#job-inspector');if(!p){host.innerHTML='';return;}
- inspectedId=p.id;const n=progress(p);
- main.querySelectorAll('[data-inspect]').forEach(a=>a.setAttribute('aria-current',a.dataset.inspect===p.id?'true':'false'));
- host.innerHTML=`<div class="inspection"><small>งานที่เลือก</small><h2>${esc(p.code)}</h2><p>${esc(p.name)}</p><div class="inspection-location"><small>Location</small>${listMetadata(p)}</div><div class="inspection-line">สถานะงานถ่าย ${badge(p)}</div><h3>ภาพที่ต้องถ่าย <small>${n.required} / 7 มุม</small></h3><ul class="inspection-angles">${ANGLES.filter(a=>a.required).map(a=>`<li>${icon(p.photos?.[a.id]?.length?'check':'camera')}<b>${a.name}</b><small>${p.photos?.[a.id]?.length?p.photos[a.id].length+' รูป':'ยังไม่มีรูป'}</small></li>`).join('')}</ul><small>ผู้ขอรูป</small><strong>${esc(workspace.data.find(row=>row.id===p.id)?.requester||'—')}</strong><p>${esc(p.purpose||'')}</p>${queueActions(p)}</div>`;
+ const cover=coverPhoto(p)?`<img data-list-product="${id}" alt="" loading="lazy">`:'';
+ const marks=ANGLES.filter(a=>a.required).map(a=>`<i class="${p.photos?.[a.id]?.length?'taken':''}"></i>`).join('');
+ return `<article class="board-card" data-job="${id}"><a class="board-card-link" href="#product/${id}">
+ <div class="board-card-title"><span class="board-photo list-photo">${icon('camera')}${cover}</span><div><strong>${esc(p.code)}</strong><div>${esc(p.name)}</div></div></div>
+ ${listMetadata(p)}<div class="board-progress"><span aria-hidden="true">${marks}</span><small>${n.required}/7 มุม · ${n.total} รูป</small></div></a>
+ ${p.dirty?'<small class="draft-indicator">ฉบับร่างในเครื่อง · ยังไม่บันทึก</small>':''}
+ ${p.remoteUpdate?`<button data-cloud-view="${id}">ดูรูปจากชีตที่อัปเดต</button>`:''}${queueActions(p)}</article>`;
 }
 function renderTable(){
- const match=filteredProducts();
- const summary=$('#filter-summary');if(summary)summary.textContent=(batchFilter||stockStatusFilter||query||importFrom||importTo||filter!=='all')?'กำลังใช้ตัวกรอง · แสดง '+match.length+' จากทั้งหมด '+products.length+' รายการ — กดล้างตัวกรองเพื่อดูทุกงาน':'';
- const pages=Math.max(1,Math.ceil(match.length/10));page=Math.min(page,pages);const shown=match.slice((page-1)*10,page*10);
- $('#table-area').innerHTML=shown.length?`<div class="queue-list">${shown.map(queueRow).join('')}</div><div class="pagination"><span>แสดง ${(page-1)*10+1}–${Math.min(page*10,match.length)} จาก ${match.length.toLocaleString()} รายการ</span><div class="actions"><button id="prev" aria-label="หน้าก่อน" ${page===1?'disabled':''}>‹</button><span>${page} / ${pages}</span><button id="next" aria-label="หน้าถัดไป" ${page===pages?'disabled':''}>›</button></div></div>`:`<div class="empty"><div class="empty-illustration">${icon(products.length?'search':'camera')}</div><h3>${products.length?'ไม่พบสินค้าที่ค้นหา':'เริ่มต้นงานถ่ายรูปชุดแรกของคุณ'}</h3><p>${products.length?'ลองเปลี่ยนคำค้นหาหรือตัวกรอง':'นำเข้าไฟล์ Excel แบบฟอร์มขอรูปถ่ายสินค้า<br>แล้วเลือกสินค้าเพื่อถ่ายรูปให้ครบทั้ง 7 มุมที่จำเป็น'}</p><button id="empty-import" class="primary">${icon('import')}นำเข้าไฟล์</button>${!products.length?'<br><button class="ghost text-link" id="demo">ทดลองหน้าถ่ายรูปด้วยข้อมูลสมมติ →</button>':''}</div>`;
- inspectJob(shown.find(p=>p.id===inspectedId)||shown[0]);
- main.querySelectorAll('[data-inspect]').forEach(link=>link.onclick=event=>{
-  if(!matchMedia('(min-width: 900px)').matches||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
-  event.preventDefault();inspectJob(shown.find(p=>p.id===link.dataset.inspect));bindActions($('#job-inspector'));
- });
- $('#prev')?.addEventListener('click',()=>{page--;renderTable();});$('#next')?.addEventListener('click',()=>{page++;renderTable();});$('#empty-import')?.addEventListener('click',openImport);$('#demo')?.addEventListener('click',()=>run(addDemo));
+ const today=todayInBangkok(),match=filteredProducts(today);
+ renderedBoardDay=today;
+ $('#board-date').textContent=new Intl.DateTimeFormat('th-TH',{timeZone:'Asia/Bangkok',dateStyle:'full'}).format(new Date());
+ $('#backlog-count').textContent=products.filter(pendingJob).length+' งาน';
+ main.querySelectorAll('[data-scope]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.scope===boardScope)));
+ const groups={waiting:[],progress:[],complete:[],closed:[]};
+ for(const p of match)groups[status(p)].push(p);
+ const hasFilters=Boolean(query||stockStatusFilter||batchFilter||importFrom||importTo||filter!=='all');
+ const scopeLabel={today:'นำเข้าวันนี้',all:'งานทุกวัน',backlog:'งานค้างทุกวัน'}[boardScope];
+ $('#filter-summary').textContent=scopeLabel+' · '+match.length+' งาน'+(hasFilters?' ตามตัวกรอง':'');
+ const limit=6*page,area=$('#table-area'),closedOpen=area.querySelector('.board-closed')?.open||filter==='closed';
+ function laneCards(rows){return rows.slice(0,limit).map(boardCard).join('')||'<p class="board-lane-empty">ไม่มีงาน</p>';}
+ const lanes=boardLanes.filter(([id])=>id!=='closed'&&(filter==='all'||id===filter)&&(boardScope!=='backlog'||id!=='complete'));
+ const closed=groups.closed;
+ area.innerHTML=(match.length?`<div class="status-board">${lanes.map(([id,label])=>`<section class="board-lane" data-lane="${id}"><h2><i></i>${label}<span>${groups[id].length}</span></h2><div class="board-cards">${laneCards(groups[id])}</div></section>`).join('')}</div>
+ ${closed.length?`<details class="board-closed" ${closedOpen?'open':''}><summary>ปิดงานแล้ว · ${closed.length} งาน</summary><div class="board-cards">${laneCards(closed)}</div></details>`:''}
+ ${Object.values(groups).some(rows=>rows.length>limit)?'<button id="board-more">แสดงงานเพิ่มเติม</button>':''}`:
+ `<div class="empty board-empty">${icon('camera')}<h3>${hasFilters?'ไม่พบงานตามตัวกรอง':boardScope==='today'?'วันนี้ยังไม่มีงานนำเข้า':boardScope==='backlog'?'ไม่มีงานค้าง':'ยังไม่มีงานถ่าย'}</h3>
+ <button id="empty-import">${icon('import')}นำเข้าไฟล์</button>${!products.length?'<button class="ghost" id="demo">ทดลองถ่ายด้วยข้อมูลสมมติ</button>':''}</div>`);
+ $('#board-more')?.addEventListener('click',()=>{page++;renderTable();});
+ $('#empty-import')?.addEventListener('click',openImport);$('#demo')?.addEventListener('click',()=>run(addDemo));
  function bindActions(container){
   container.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>location.hash='product/'+b.dataset.open);
  container.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.view);if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl,thumbnailUrl});});
@@ -401,10 +432,6 @@ function updateSyncStatus(){
 }
 function refreshProductView(){
  if(!$('#table-area'))return;
- const cards=main.querySelector('.stats');if(cards)cards.outerHTML=stats();
- const count=main.querySelector('.panel-head h2 .badge');if(count)count.textContent=products.length+' รายการ';
- const labels={all:'ทั้งหมด',waiting:'รอถ่าย',progress:'กำลังถ่าย',complete:'ถ่ายครบ',closed:'ปิดงาน'};
- main.querySelectorAll('[data-filter]').forEach(b=>{const id=b.dataset.filter;b.innerHTML=labels[id]+' <span>'+(id==='all'?products.length:products.filter(p=>status(p)===id).length)+'</span>';});
  const select=$('#batch-filter');if(select&&document.activeElement!==select){select.innerHTML='<option value="">ไฟล์นำเข้าทั้งหมด</option>'+batches.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('');if(!batches.some(b=>b.id===batchFilter))batchFilter='';select.value=batchFilter;$('#delete-filter-batch').disabled=!batchFilter;}
  const statusSelect=$('#stock-status-filter');if(statusSelect&&document.activeElement!==statusSelect){const inv=stockStatusOptions();statusSelect.innerHTML='<option value="">ทุกสถานะสินค้า</option>'+inv.map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join('');if(stockStatusFilter&&!inv.includes(stockStatusFilter))stockStatusFilter='';statusSelect.value=stockStatusFilter;}
  renderTable();updateSyncStatus();
@@ -621,14 +648,14 @@ async function commitImport(){
  if(!chosen.length)throw Error('กรุณาเลือกอย่างน้อย 1 งานถ่ายก่อนนำเข้า');
  const id=uid(),now=stamp(),batch={id,name:s.file.name,file:s.file,createdAt:now,fingerprint:s.fingerprint,workbook:s.workbook,count:chosen.length,synced:false};
  const added=chosen.map(p=>({...p,id:uid(),createdAt:now,importId:id,sourceSheet:s.workbook.sheets[s.index].name,stockCompany:p.stockCompany||'',stockLocation:p.stockLocation||'',stockStatus:p.stockStatus||'',stockQty:p.stockQty??'',photos:{},fields:{photographer:settings.photographer||''},dimensions:{},dirty:true}));
- busy('ตรวจรหัสแล้ว · กำลังบันทึกรายการในเครื่อง',15);await db.commitImport(batch,added);closeModal();await reloadLocal();filter='all';query='';stockStatusFilter='';batchFilter=id;page=1;location.hash='products';renderProducts();toast('นำเข้า '+added.length+' งานถ่ายแล้ว');
+ busy('ตรวจรหัสแล้ว · กำลังบันทึกรายการในเครื่อง',15);await db.commitImport(batch,added);closeModal();await reloadLocal();filter='all';query='';stockStatusFilter='';batchFilter=id;boardScope='today';importFrom='';importTo='';page=1;location.hash='products';renderProducts();toast('นำเข้า '+added.length+' งานถ่ายแล้ว');
  if(cloud.connected()){await cloud.syncImport(batch,added,(msg,pct)=>busy(msg,20+0.7*pct));busy('กำลังตรวจรายการที่บันทึกในชีต',92);const remote=await cloud.loadProducts();for(const p of remote.filter(x=>x.importId===id))await db.put('products',p);toast('บันทึกลง Data แล้ว · แยกงานตาม Company · Location · สถานะ');await reloadLocal();renderProducts();}
 }
 function renderImports(){
  const pending=(workspace.deletions||[]).filter(b=>b.status==='pending');
  main.innerHTML=title('','ไฟล์นำเข้า','เรียงตามวันที่นำเข้าล่าสุด',`<button class="primary" id="import">${icon('import')}นำเข้าไฟล์</button>`)+`<section class="panel"><div class="panel-head"><h2>ประวัติการนำเข้า</h2><small>${batches.length} ไฟล์</small></div><div class="panel-body">${batches.length?batches.map(b=>`<div class="import-list-item"><div class="stat-icon">${icon('file')}</div><div><h3>${esc(b.name)}</h3><p>${fmtDate(b.createdAt)} · ${b.count} สินค้า · ${b.workbook?.sheets?.length||'—'} แท็บ</p><div class="actions" style="margin-top:8px"><button class="small" data-batch="${b.id}">ดูรายการ</button>${b.synced?`<a class="text-link" style="margin:0" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${encodeURIComponent(b.driveId)}/view">ไฟล์ต้นฉบับใน Drive ↗</a>`:`<button class="small" data-sync-import="${b.id}">${icon('cloud')}บันทึกลง Google</button>`}<button class="danger small" data-delete-batch="${b.id}">ลบทั้งไฟล์</button></div></div><span class="badge ${b.synced?'complete':'waiting'}">${b.synced?'บันทึกแล้ว':'อยู่ในเครื่อง'}</span></div>`).join(''):'<div class="empty"><div class="empty-illustration">'+icon('file')+'</div><h3>ยังไม่มีไฟล์นำเข้า</h3><p>ไฟล์ที่นำเข้าจะปรากฏที่นี่ พร้อมสถานะการบันทึก</p></div>'}</div></section><div class="sync-note">${icon('info')}<span>รายการสินค้าลง Data ตามหัวข้อเดิม พร้อมข้อมูลเพิ่มเติมและลิงก์รูป Drive • ข้อมูลทุกเซลล์และทุกแท็บยังมีสำรองใน PIM_Source และไฟล์ Excel ต้นฉบับใน Drive</span></div>`;
  if(pending.length)main.insertAdjacentHTML('beforeend','<section class="panel"><div class="panel-head"><h2>งานที่ยังลบไม่ครบ</h2></div><div class="panel-body">'+pending.map(b=>'<div class="import-list-item"><div><h3>'+esc(b.name)+'</h3><p>การลบครั้งก่อนยังไม่เสร็จ กดทำต่อเพื่อลบข้อมูลที่เหลือ</p></div><button class="danger" data-delete-batch="'+esc(b.id)+'">ทำการลบต่อ</button></div>').join('')+'</div></section>');
- main.querySelectorAll('[data-delete-batch]').forEach(b=>b.onclick=()=>openDeleteImport(b.dataset.deleteBatch));$('#import').onclick=openImport;main.querySelectorAll('[data-batch]').forEach(b=>b.onclick=()=>{batchFilter=b.dataset.batch;filter='all';query='';location.hash='products';});
+ main.querySelectorAll('[data-delete-batch]').forEach(b=>b.onclick=()=>openDeleteImport(b.dataset.deleteBatch));$('#import').onclick=openImport;main.querySelectorAll('[data-batch]').forEach(b=>b.onclick=()=>{batchFilter=b.dataset.batch;boardScope='all';filter='all';query='';stockStatusFilter='';importFrom='';importTo='';page=1;location.hash='products';});
  main.querySelectorAll('[data-sync-import]').forEach(b=>b.onclick=()=>run(async()=>{if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ก่อน');const batch=batches.find(x=>x.id===b.dataset.syncImport);await cloud.syncImport(batch,products.filter(x=>x.importId===batch.id),busy);await reloadLocal();renderImports();toast('บันทึกไฟล์ต้นฉบับและข้อมูลทุกแท็บสำเร็จ');}));
 }
 function renderSettings(){
@@ -670,6 +697,7 @@ async function exportCSV(format='csv'){
 window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||'เกิดข้อผิดพลาด กรุณาลองใหม่',true);});
 let autoConnecting=false,appReady=false,lastAutoAttempt=0;
 async function autoSync(){
+ if(!document.hidden&&$('#table-area')&&renderedBoardDay!==todayInBangkok())renderTable();
  if(!appReady||autoConnecting||working||current||photoUploads.size||document.hidden)return;
  if(cloud.connected()&&Date.now()-lastRefreshAttempt<15000)return;
  if(modal.open&&cloud.connected())return;
@@ -677,7 +705,6 @@ async function autoSync(){
  autoConnecting=true;lastAutoAttempt=Date.now();updateConnection();
  try{if(reconnect){await cloud.connect(settings);window.dispatchEvent(new Event('pim-cloud-connected'));}updateConnection();if(!modal.open)await refreshCloud(true);}catch(e){syncError=e.message||String(e);updateSyncStatus();}finally{autoConnecting=false;updateConnection();}
 }
-await (async()=>{settings=await db.get('settings','config')||settings;brand=await db.get('settings','branding')||brand;workspace=await db.get('settings','workspace-cache')||workspace;lastSync=workspace.at||'';applyBranding();cloud.configure(settings);await route();appReady=true;await autoSync();})();
 
 
 function clearReport(){for(const url of reportUrls)URL.revokeObjectURL(url);reportUrls=[];}
@@ -811,3 +838,4 @@ async function openDeleteImport(batchId){
  }catch(e){closeModal();toast(e.message,true);}
 }
 
+await (async()=>{settings=await db.get('settings','config')||settings;brand=await db.get('settings','branding')||brand;workspace=await db.get('settings','workspace-cache')||workspace;lastSync=workspace.at||'';applyBranding();cloud.configure(settings);await route();appReady=true;await autoSync();})();

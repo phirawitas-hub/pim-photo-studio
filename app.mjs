@@ -23,7 +23,7 @@ function pendingJob(p){const state=status(p);return !p.demo&&(state==='waiting'|
 function todayInBangkok(){return importDay({createdAt:new Date()});}
 let rankingMetric='items';
 let summaryFilter={file:'',requester:'',status:'',from:'',to:'',date:'import'};
-let brand={name:'PIM.',subtitle:'PHOTO STUDIO',logo:new URL('./assets/pim-logo.webp',import.meta.url).href};
+let brand={name:'PIM.',subtitle:'PHOTO STUDIO',logo:new URL('./assets/pim-logo.webp?v=20261123studiobox',import.meta.url).href};
 let workspace={options:[],data:[],stock:{rows:[]}},lastSync='',syncing=false,syncError='',syncResult=null,lastRefreshAttempt=0;
 const objectUrls=new Map(),photoLoads=new Map();let reportUrls=[];
 function toast(message,error=false){if(working&&error)operationFailed=true;const t=$('#toast');t.textContent=message;t.className='show'+(error?' error':'');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.className='',6500);}
@@ -817,7 +817,7 @@ function brandingPanel(){return '<section class="panel"><div class="panel-head">
 function bindBranding(){
  let logo=brand.logo;async function previewLogo(f){if(!['image/png','image/jpeg','image/webp'].includes(f.type)||f.size>5*1024*1024)throw Error('เลือก PNG, JPG หรือ WebP ไม่เกิน 5 MB');const bitmap=await createImageBitmap(f),ratio=Math.min(1,320/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*ratio));canvas.height=Math.max(1,Math.round(bitmap.height*ratio));canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();logo=canvas.toDataURL('image/webp',.9);if(logo.length>180000)throw Error('โลโก้มีขนาดใหญ่เกินไป');$('#brand-preview').src=logo;$('#brand-preview').hidden=false;}
  $('#brand-file').onchange=()=>run(async()=>{const f=$('#brand-file').files[0];if(f)await previewLogo(f);});
- $('#brand-default').onclick=()=>run(async()=>{const response=await fetch(new URL('./assets/pim-logo.webp',import.meta.url));if(!response.ok)throw Error('โหลดโลโก้ไม่สำเร็จ');await previewLogo(await response.blob());});
+ $('#brand-default').onclick=()=>run(async()=>{const response=await fetch(new URL('./assets/pim-logo.webp?v=20261123studiobox',import.meta.url));if(!response.ok)throw Error('โหลดโลโก้ไม่สำเร็จ');await previewLogo(await response.blob());});
  $('#brand-remove').onclick=()=>{logo='';$('#brand-preview').hidden=true;};
  $('#brand-save').onclick=()=>run(async()=>{if(!cloud.connected())throw Error('เชื่อม Google ก่อนบันทึกการตั้งค่าร่วม');busy('กำลังบันทึกชื่อและโลโก้');brand=await cloud.saveBranding({name:$('#brand-name').value,subtitle:$('#brand-subtitle').value,logo});await db.put('settings',{id:'branding',...brand});applyBranding();toast('บันทึกแล้ว ทุกเครื่องจะเห็นเมื่อซิงก์');});
 }

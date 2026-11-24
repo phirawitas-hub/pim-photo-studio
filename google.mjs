@@ -44,8 +44,12 @@ export async function syncImport(batch,products,onProgress=()=>{}){
  await rpc('finishImport',{row:[batch.id,batch.name,batch.createdAt,batch.driveId,batch.workbook.sheets.map(s=>s.name).join(' | '),products.length]});
  await syncRows();batch.synced=true;batch.sheetId=config.sheetId;await db.put('imports',batch);
 }
+function requireCompletePhotos(p){
+ const missing=validatePhotos(p);
+ if(missing.length)throw Error('กรุณาถ่ายให้ครบ 7 มุม · ยังขาด '+missing.join(', '));
+}
 export async function saveProduct(p,onProgress=()=>{}){
- validatePhotos(p);assertSheet(p);if(!p.dirty&&p.baseRevision)return;
+ requireCompletePhotos(p);assertSheet(p);if(!p.dirty&&p.baseRevision)return;
  const batch=await db.get('imports',p.importId);
  if(batch){assertSheet(batch);if(!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),(msg,pct)=>onProgress(msg,pct/4));}
  const history=await itemHistory(p.code,p),latest=history.at(-1);
@@ -60,6 +64,7 @@ export async function saveProduct(p,onProgress=()=>{}){
  const snapQty=String(p.liveStockQty!==undefined&&p.liveStockQty!==''?p.liveStockQty:(p.stockQty??'')).trim();
  const meta={fields:p.fields||{},dimensions:p.dimensions||{},purpose:p.purpose||''};
  if(snapCompany||snapLocation||snapStatus)meta.stockSnapshot={company:snapCompany,location:snapLocation,status:snapStatus,qty:snapQty};
+ requireCompletePhotos({photos});
  onProgress('บันทึกเวอร์ชันลง Google Sheet',92);
  const r=await rpc('revision',{id:p.pendingRevision,productId:p.id,baseRevision:p.itemHead||p.baseRevision||null,meta,photos});
  p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.sheetId=config.sheetId;p.syncedAt=r.at;if(r.stockSnapshot){p.stockSnapshot=r.stockSnapshot;p.stockQty=r.stockSnapshot.qty;}await db.put('products',p);

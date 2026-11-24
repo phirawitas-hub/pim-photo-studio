@@ -9,7 +9,7 @@ initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs?v=20261120jobclose';
 import * as db from './store.mjs?v=20261120speed';
-import * as cloud from './google.mjs?v=20261120speed';
+import * as cloud from './google.mjs?v=20261124angles';
 import {openPhotoViewer} from './viewer.mjs?v=20261120studio';
 cloud.warmup();
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
@@ -66,7 +66,7 @@ const photoUploads=new Map();
 function uploadStatus(message,percent){clearTimeout(uploadStatus.timer);let box=$('#upload-status');if(!box){box=document.createElement('div');box.id='upload-status';box.setAttribute('role','status');document.body.append(box);}box.innerHTML='<span>'+esc(message)+'</span>'+(Number.isFinite(percent)?'<b>'+percent+'%</b><progress max="100" value="'+percent+'" aria-label="อัปโหลดรูปตามจำนวนที่บันทึกสำเร็จ"></progress>':'');if(percent===100)uploadStatus.timer=setTimeout(()=>box.remove(),5000);}
 function queuePhotoUpload(p){
  const previous=photoUploads.get(p.id)||Promise.resolve();
- const task=previous.catch(()=>{}).then(async()=>{const latest=await db.get('products',p.id);if(!latest||latest.demo)return;if(!cloud.connected()){uploadStatus('ยังไม่เชื่อม Google · เก็บรูปไว้ในเครื่อง รออัปโหลด');return;}await cloud.uploadProductPhotos(latest,(message,percent)=>uploadStatus(message,percent));for(const list of Object.values(p.photos||{}))for(const ph of list){const uploaded=Object.values(latest.photos||{}).flat().find(x=>x.id===ph.id);if(uploaded?.fileId)ph.fileId=uploaded.fileId;}if(current===p&&progress(p).required===7&&p.fields?.photographer?.trim()){await saveDraft();await cloud.saveProduct(p,(message,percent)=>uploadStatus(message,percent));uploadStatus('อัปโหลดและบันทึกสำเร็จ',100);await reloadLocal();const next=nextPendingSibling(p);if(next){location.hash='product/'+next.id;toast('บันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}else{location.hash='products';toast('บันทึกสำเร็จ 100% · กลับรายการสินค้า');}}});
+ const task=previous.catch(()=>{}).then(async()=>{const latest=await db.get('products',p.id);if(!latest||latest.demo)return;if(!cloud.connected()){uploadStatus('ยังไม่เชื่อม Google · เก็บรูปไว้ในเครื่อง รออัปโหลด');return;}await cloud.uploadProductPhotos(latest,(message,percent)=>uploadStatus(message,percent));for(const list of Object.values(p.photos||{}))for(const ph of list){const uploaded=Object.values(latest.photos||{}).flat().find(x=>x.id===ph.id);if(uploaded?.fileId)ph.fileId=uploaded.fileId;}if(current===p&&progress(p).required===7&&p.fields?.photographer?.trim()){await saveDraft();await cloud.saveProduct(p,(message,percent)=>uploadStatus(message,percent));uploadStatus('อัปโหลดและบันทึกสำเร็จ',100);await reloadLocal();if(current!==p)return;const next=nextPendingSibling(p);if(next){location.hash='product/'+next.id;toast('บันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}else{location.hash='products';toast('บันทึกสำเร็จ 100% · กลับรายการสินค้า');}}});
  photoUploads.set(p.id,task);task.catch(e=>{uploadStatus('อัปโหลดไม่สำเร็จ · รูปยังอยู่ในเครื่อง');toast(e.message,true);}).finally(()=>{if(photoUploads.get(p.id)===task)photoUploads.delete(p.id);});return task;
 }
 
@@ -88,7 +88,43 @@ function stopCamera(){cancelNativeCamera();}
 modal.addEventListener('close',stopCamera);window.addEventListener('pagehide',stopCamera);
 async function signIn(usePopup=true){cloud.disconnect();busy('กำลังเชื่อมต่อ Google');await cloud.connect(settings,usePopup);await refreshCloud(true);const name=await cloud.checkConnection();toast('เชื่อมต่อชีต '+name+' แล้ว');updateConnection();if(location.hash==='#settings')renderSettings();}
 async function reloadLocal(){products=await db.all('products');batches=newestImports(await db.all('imports'));}
-async function route(){cancelNativeCamera();await reloadLocal();const r=location.hash.slice(1).split('/');document.body.dataset.page=r[0]||'products';if(r[0]!=='product')current=null;document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===(r[0]==='product'?'products':r[0]||'products')));document.querySelectorAll('.nav-group').forEach(g=>{if(g.querySelector('a.active'))g.open=true;});if(r[0]==='product'){current=products.find(p=>p.id===r[1]);section=r[2]||'gallery';if(!current){location.hash='products';toast('ไม่พบสินค้า',true);return;}renderDetail();}else if(r[0]==='summary')renderSummary();else if(r[0]==='imports')renderImports();else if(r[0]==='settings')renderSettings();else renderProducts();updatePageHeading();updateConnection();}
+function missingCaptureAngles(job){
+ return job&&!job.demo&&!job.closed?validatePhotos(job):[];
+}
+function missingAngleMessage(missing){
+ return 'กรุณาถ่ายให้ครบ 7 มุม · ยังขาด '+missing.join(', ');
+}
+function rememberCapture(job){
+ try {
+  if(missingCaptureAngles(job).length)sessionStorage.setItem('pim-unfinished-capture',job.id);
+  else sessionStorage.removeItem('pim-unfinished-capture');
+ }catch{}
+}
+function restoredCapture(){
+ try{return products.find(p=>p.id===sessionStorage.getItem('pim-unfinished-capture'));}catch{return null;}
+}
+document.addEventListener('click',event=>{
+ const link=event.target.closest?.('a[href^="#"]');
+ if(!link||!current)return;
+ const [routeName,id]=link.hash.slice(1).split('/');
+ if(routeName==='product'&&id===current.id)return;
+ const missing=missingCaptureAngles(current);
+ if(missing.length){event.preventDefault();toast(missingAngleMessage(missing),true);}
+},true);
+window.addEventListener('beforeunload',event=>{
+ if(!missingCaptureAngles(current).length)return;
+ event.preventDefault();event.returnValue='';
+});
+async function route(){
+ cancelNativeCamera();await reloadLocal();
+ let r=location.hash.slice(1).split('/');
+ const active=current||restoredCapture(),missing=missingCaptureAngles(active);
+ if(missing.length&&(r[0]!=='product'||r[1]!==active.id)){
+  r=['product',active.id,'gallery'];
+  history.replaceState(history.state,'','#'+r.join('/'));
+  toast(missingAngleMessage(missing),true);
+ }
+ document.body.dataset.page=r[0]||'products';if(r[0]!=='product')current=null;document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===(r[0]==='product'?'products':r[0]||'products')));document.querySelectorAll('.nav-group').forEach(g=>{if(g.querySelector('a.active'))g.open=true;});if(r[0]==='product'){current=current?.id===r[1]?current:products.find(p=>p.id===r[1]);section=r[2]||'gallery';if(!current){rememberCapture(null);location.hash='products';toast('ไม่พบสินค้า',true);return;}renderDetail();}else if(r[0]==='summary')renderSummary();else if(r[0]==='imports')renderImports();else if(r[0]==='settings')renderSettings();else renderProducts();updatePageHeading();updateConnection();}
 window.addEventListener('hashchange',()=>route().catch(e=>toast(e.message,true)));
 function renderProducts(){
  const invStatuses=stockStatusOptions();
@@ -127,6 +163,7 @@ function filteredProducts(today=todayInBangkok()){
   matchesDate(p));
 }
 function jobCloseButton(p){
+ if(current?.id===p?.id&&missingCaptureAngles(p).length)return '';
  if(!p||p.demo||!p.importSynced||status(p)==='complete')return '';
  return '<button type="button" class="small job-close" data-job-close="'+esc(p.id)+'">'+(p.closed?'เปิดงานอีกครั้ง':'ปิดงาน')+'</button>';
 }
@@ -201,6 +238,7 @@ function renderTable(){
 }
 async function addDemo(){let p=products.find(p=>p.demo);if(!p){p={id:uid(),code:'DEMO-001',name:'สินค้าตัวอย่างสำหรับทดลองถ่ายรูป',purpose:'ข้อมูลสมมติ • ทดลองใช้งาน',demo:true,createdAt:stamp(),photos:{},fields:{},dimensions:{},dirty:true};await db.put('products',p);}location.hash='product/'+p.id;}
 function renderDetail(){
+ rememberCapture(current);
  const p=current,n=progress(p),sibs=siblingProducts(p),sibIndex=sibs.findIndex(x=>x.id===p.id)+1,snap=p.stockSnapshot||null;
  const stCompany=snap?.company||p.stockCompany||'',stLocation=snap?.location||p.stockLocation||'',stStatus=normalizeInventoryStatus(snap?.status||p.stockStatus||''),stQty=snap?.qty!==undefined&&snap?.qty!==''?snap.qty:(p.stockQty??'');
  const scoped=Boolean(stCompany||stLocation||stStatus);
@@ -329,7 +367,7 @@ function renderHistory(){
  const p=current; (async()=>{try{
   if(!cloud.connected())throw Error('เชื่อม Google เพื่อเลือก Revision ที่เคยถ่ายไว้');
   const rows=await cloud.itemHistory(p.code,p);if(current!==p||!$('#history-content'))return;
-  $('#history-content').innerHTML=rows.length?rows.map((r,i)=>{const meta=JSON.parse(r[4]||'{}'),photos=JSON.parse(r[5]||'{}'),chosen=p.baseRevision===r[0]&&!p.newRevision,snap=meta.stockSnapshot;return '<div class="revision-item"><div><b>Revision '+(meta.revisionNumber||i+1)+' '+(snap?.status?stockStatusBadge(snap.status):'')+'</b>'+(snap?'<p class="revision-stock-snap">'+esc([snap.company,snap.location].filter(Boolean).join(' · ')+(snap.qty!==undefined&&snap.qty!==''?' · Qty '+snap.qty:''))+'</p>':'')+'<p>'+esc(meta.fields?.photographer||'ไม่ได้ระบุผู้ถ่าย')+' · '+fmtDate(r[2])+'</p><small>'+Object.values(photos).reduce((n,a)=>n+a.length,0)+' รูป'+(r[1]!==p.id?' · จากงานนำเข้าอื่น':'')+'</small></div><button data-use-revision="'+esc(r[0])+'" '+(chosen?'disabled':'')+'>'+ (chosen?'กำลังแสดง / Export':'ใช้ชุดนี้แสดง / Export')+'</button></div>';}).reverse().join(''):'<p class="subtext">ยังไม่มี Revision ของชุดสินค้านี้</p>';
+  $('#history-content').innerHTML=rows.length?rows.map((r,i)=>{const meta=JSON.parse(r[4]||'{}'),photos=JSON.parse(r[5]||'{}'),chosen=p.baseRevision===r[0]&&!p.newRevision,snap=meta.stockSnapshot,incomplete=validatePhotos({photos}).length>0;return '<div class="revision-item"><div><b>Revision '+(meta.revisionNumber||i+1)+' '+(snap?.status?stockStatusBadge(snap.status):'')+'</b>'+(snap?'<p class="revision-stock-snap">'+esc([snap.company,snap.location].filter(Boolean).join(' · ')+(snap.qty!==undefined&&snap.qty!==''?' · Qty '+snap.qty:''))+'</p>':'')+'<p>'+esc(meta.fields?.photographer||'ไม่ได้ระบุผู้ถ่าย')+' · '+fmtDate(r[2])+'</p><small>'+Object.values(photos).reduce((n,a)=>n+a.length,0)+' รูป'+(r[1]!==p.id?' · จากงานนำเข้าอื่น':'')+'</small></div><button data-use-revision="'+esc(r[0])+'" '+(chosen||incomplete?'disabled':'')+'>'+ (chosen?'กำลังแสดง / Export':incomplete?'ชุดนี้ยังถ่ายไม่ครบ':'ใช้ชุดนี้แสดง / Export')+'</button></div>';}).reverse().join(''):'<p class="subtext">ยังไม่มี Revision ของชุดสินค้านี้</p>';
   main.querySelectorAll('[data-use-revision]').forEach(b=>b.onclick=()=>{
    const select=()=>run(async()=>{busy('กำลังเลือก Revision');await cloud.selectRevision(current,b.dataset.useRevision);closeModal();renderDetail();toast('Data และ PDF จะใช้ Revision ที่เลือก');});
    if(current.dirty){openModal(modalHeader('เปลี่ยนชุดรูปที่แสดง')+'<div class="modal-body"><p>มีฉบับร่างที่ยังไม่บันทึก การเลือกชุดเดิมจะแทนที่ฉบับร่างของรายการนี้ รูปที่เคยบันทึกใน Drive ยังอยู่</p><button id="confirm-select">เลือก Revision นี้</button></div>');$('#confirm-select').onclick=select;}else select();
@@ -348,7 +386,7 @@ async function loadStock(p){
   const liveActive=activeSlotKey?result.rows.find(r=>stockSlotKey(r.company,r.location,r.status)===activeSlotKey):null;
   if(liveActive&&liveActive.qty!==undefined&&liveActive.qty!=='')p.liveStockQty=String(liveActive.qty).trim();
   const matchedIds=new Set();
-  const canEdit=!p.demo&&!!p.importId&&result.rows.length>0;
+  const canEdit=!p.demo&&!!p.importId&&result.rows.length>0&&!missingCaptureAngles(p).length;
   const closedSibs=sibs.filter(s=>s.closed).length;
   const doneSibs=sibs.filter(s=>status(s)==='complete').length;
   const rowsHtml=result.rows.map((r,idx)=>{
@@ -375,6 +413,7 @@ async function loadStock(p){
  }catch(e){if(target.isConnected)target.textContent=e.message;}
 }
 async function applyJobLocations(p,slots,focusSlotKey=''){
+ const missing=missingCaptureAngles(p);if(missing.length)throw Error(missingAngleMessage(missing));
  if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ก่อนแก้ไข Location');
  busy('กำลังอัปเดต Location ที่จะถ่ายในชีต',0);
  const res=await cloud.updateJobLocations({importId:p.importId,code:p.code,slots});
@@ -424,7 +463,7 @@ function openEditLocations(p,liveRows=[]){
  };
  renderBody();
 }
-async function saveCloud(){if(current.demo)throw Error('ข้อมูลสมมติใช้ทดลองในเครื่องเท่านั้น กรุณานำเข้าสินค้าจริงเพื่อบันทึก');if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ในหน้าตั้งค่าก่อน');if(current.dirty||!current.baseRevision)assignPhotographer(current,currentPhotographer());await saveDraft();if(!current.fields?.photographer?.trim())throw Error('กรุณาระบุชื่อผู้ถ่ายก่อนบันทึก');const p=current;await photoUploads.get(p.id);await cloud.saveProduct(p,(message,percent)=>{busy(message,percent);uploadStatus(message,percent);});uploadStatus('บันทึกลง Google สำเร็จ',100);await reloadLocal();const next=nextPendingSibling(p);if(next){location.hash='product/'+next.id;toast('อัปโหลดและบันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}else{location.hash='products';toast('อัปโหลดและบันทึกสำเร็จ 100%');}await refreshCloud(true);}
+async function saveCloud(){const missing=missingCaptureAngles(current);if(missing.length)throw Error(missingAngleMessage(missing));if(current.demo)throw Error('ข้อมูลสมมติใช้ทดลองในเครื่องเท่านั้น กรุณานำเข้าสินค้าจริงเพื่อบันทึก');if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ในหน้าตั้งค่าก่อน');if(current.dirty||!current.baseRevision)assignPhotographer(current,currentPhotographer());await saveDraft();if(!current.fields?.photographer?.trim())throw Error('กรุณาระบุชื่อผู้ถ่ายก่อนบันทึก');const p=current;await photoUploads.get(p.id);await cloud.saveProduct(p,(message,percent)=>{busy(message,percent);uploadStatus(message,percent);});uploadStatus('บันทึกลง Google สำเร็จ',100);await reloadLocal();if(current!==p)return;const next=nextPendingSibling(p);if(next){location.hash='product/'+next.id;toast('อัปโหลดและบันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}else{location.hash='products';toast('อัปโหลดและบันทึกสำเร็จ 100%');}await refreshCloud(true);}
 function updateSyncStatus(){
  const button=$('#refresh');if(button){button.disabled=syncing;button.innerHTML=icon('refresh')+(syncing?'กำลังดึงข้อมูลล่าสุด…':'รีเฟรชจากชีต');}
  const box=$('#sync-status');if(!box)return;
@@ -802,10 +841,19 @@ async function hydrateListPhotos(){
 }
 
 function renderSaveBar(){
+ const missing=missingCaptureAngles(current);
  const snapScope=hasStockScope(current)?'<span class="save-dock-scope">บันทึกคู่กับ: '+stockStatusBadge(current.stockStatus)+' '+esc([current.stockCompany,current.stockLocation].filter(Boolean).join(' · '))+'</span>':'';
  main.insertAdjacentHTML('beforeend','<div class="save-dock"><div class="dock-info"><b>ฉบับร่างบันทึกอัตโนมัติ</b>'+snapScope+'<small>จำชื่อผู้ถ่ายในเครื่องนี้จนกว่าจะเปลี่ยนเอง · เก็บ Location และสถานะ ณ เวลาบันทึก</small></div><label class="field dock-photographer">ชื่อผู้ถ่าย *'+choiceControl('photographer',currentPhotographer())+'</label><button class="primary" id="save-cloud">'+icon('cloud')+'บันทึกลง Google</button></div>');
  const p=current;$('#photographer').onchange=event=>changePhotographer(p,event.target.value).catch(e=>toast(e.message,true));
- bindChoices();$('#save-cloud').onclick=()=>run(saveCloud);
+ const save=$('#save-cloud');
+ if(missing.length){
+  save.disabled=true;
+  save.textContent='ถ่ายแล้ว '+progress(p).required+'/7 มุม';
+  save.setAttribute('aria-describedby','missing-angles');
+  const hint=document.createElement('p');hint.id='missing-angles';hint.className='notice';hint.textContent=missingAngleMessage(missing);
+  main.querySelector('.section-tabs').before(hint);
+ }
+ bindChoices();save.onclick=()=>run(saveCloud);
 }
 
 function updatePageHeading(){const page=location.hash.slice(1).split('/')[0];const title=({products:'รายการสินค้า',summary:'ภาพรวมงานถ่ายรูป',imports:'ประวัติการนำเข้า',settings:'การตั้งค่า',product:'รายละเอียดสินค้า'})[page]||'รายการสินค้า';const heading=document.querySelector('.topbar-label b');if(heading){heading.textContent=title;heading.setAttribute('aria-current','page');}document.title=title+' · '+brand.name;}

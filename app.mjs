@@ -1,3 +1,4 @@
+import {startAutoUpdate} from './auto-update.mjs';
 import {reconcileProduct,singleFlight} from './sync.mjs?v=20261120jobclose';
 import {itemCodeKey,stockSlotKey,hasStockScope,stockLabel,normalizeInventoryStatus,reviewImportProducts,requireValidImport} from './import-check.mjs?v=20261120stockstatus';
 import {selectImportSheet} from './importer.mjs?v=20261109simple';
@@ -810,6 +811,12 @@ function renderSummary(){
  $('#ranking-metric').onchange=e=>{rankingMetric=e.target.value;renderSummary();};
 }
 
+startAutoUpdate(
+ ()=>appReady&&!current&&!working&&!syncing&&!autoConnecting&&!modal.open&&!photoUploads.size&&
+  !['product','settings'].includes(location.hash.slice(1).split('/')[0])&&
+  !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName),
+ ()=>toast('มีเวอร์ชันใหม่ · แอปจะอัปเดตเมื่อกลับหน้ารายการและงานที่กำลังทำเสร็จแล้ว')
+);
 setInterval(autoSync,30000);
 window.addEventListener('focus',()=>autoSync());
 setInterval(()=>{if(appReady)updateConnection();},5000);

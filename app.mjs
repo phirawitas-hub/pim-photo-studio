@@ -9,8 +9,8 @@ import {initTheme} from './theme.mjs?v=20261103clean';
 initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs?v=20261120jobclose';
-import * as db from './store.mjs?v=20261120speed';
-import * as cloud from './google.mjs?v=20261124angles';
+import * as db from './store.mjs?v=20261125library';
+import * as cloud from './google.mjs?v=20261125library';
 import {openPhotoViewer} from './viewer.mjs?v=20261120studio';
 cloud.warmup();
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
@@ -250,9 +250,19 @@ function renderDetail(){
  $('#product-pdf').onclick=()=>run(async()=>{await saveDraft();openReportPicker([current]);});$('#back').onclick=()=>location.hash='products';main.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>location.hash='product/'+p.id+'/'+b.dataset.section);if(p.closed){$('#detail-content').innerHTML='<section class="panel modal-body">'+badge(p)+' · ยกเว้นการถ่ายรูป '+jobCloseButton(p)+'</section>';bindJobClose($('#detail-content'));return;}if(section==='details')renderFields();else if(section==='history')renderHistory();else renderGallery();renderSaveBar();
 }
 function renderGallery(){
+ const galleryJob=current;
  const nextAngle=ANGLES.find(a=>a.required&&!current.photos?.[a.id]?.length);
- $('#detail-content').innerHTML=`<section class="panel"><div class="panel-head"><div><h2>ภาพถ่ายสินค้า</h2>${nextAngle&&isMobileCameraDevice()?`<button class="primary next-camera" data-camera="${nextAngle.id}">${icon('camera')}ถ่ายมุมถัดไป · ${nextAngle.thai}</button>`:''}</div><small><span class="required">*</span> มุมบังคับ · อย่างน้อย 1 รูป</small></div><div class="panel-body"><div class="gallery">${[...ANGLES].sort((a,b)=>Number(!!current.photos?.[a.id]?.length)-Number(!!current.photos?.[b.id]?.length)).map(a=>{const photos=current.photos?.[a.id]||[];return `<article class="angle-card ${photos.length?'done':''}"><div class="angle-heading"><div><b>${a.name}${a.required?'<span class="required">*</span>':''}</b><div style="font-size:10px;color:#91a0ad;margin-top:4px">${a.thai}</div></div><small>${photos.length} / 5 รูป</small></div><div class="photo-strip">${photos.length?photos.map((ph,idx)=>`<div class="photo-tile">${icon('image')}<img data-photo="${ph.id}" data-fileid="${ph.fileId||''}" alt="${esc(a.name)} รูปที่ ${idx+1}"><button class="remove-photo" data-remove="${ph.id}" data-angle="${a.id}" aria-label="ลบ ${esc(a.name)} รูปที่ ${idx+1}">×</button><span class="slot">${idx+1} · ${size(ph.size||0)}</span></div>`).join(''):`<div class="photo-empty">${icon('image')}<span>ยังไม่มีภาพ${a.thai}<br>กดถ่ายรูปเพื่อเปิดกล้องอุปกรณ์</span></div>`}</div><div class="angle-actions"><button data-camera="${a.id}" ${photos.length>=5||!isMobileCameraDevice()?'disabled':''}>${icon('camera')}ถ่ายรูปด้วยกล้องอุปกรณ์</button></div></article>`;}).join('')}</div><div class="bottom-bar"><small>JPG, PNG, WebP · สูงสุด 20 MB ต่อรูป<br>ถ่ายแล้วเริ่มอัปโหลดเข้า Drive อัตโนมัติ</small><div class="actions"><span>${isMobileCameraDevice()?'ใช้กล้องโทรศัพท์หรือ iPad':'เปิดหน้านี้บนโทรศัพท์หรือ iPad เพื่อถ่ายรูป'}</span></div></div></div></section>`;
+ $('#detail-content').innerHTML=`<section class="panel"><div class="panel-head"><div><h2>ภาพถ่ายสินค้า</h2>${nextAngle&&isMobileCameraDevice()?`<button class="primary next-camera" data-camera="${nextAngle.id}">${icon('camera')}ถ่ายมุมถัดไป · ${nextAngle.thai}</button>`:''}</div><small><span class="required">*</span> มุมบังคับ · อย่างน้อย 1 รูป</small></div><div class="panel-body"><div class="gallery">${[...ANGLES].sort((a,b)=>Number(!!current.photos?.[a.id]?.length)-Number(!!current.photos?.[b.id]?.length)).map(a=>{const photos=current.photos?.[a.id]||[];return `<article class="angle-card ${photos.length?'done':''}"><div class="angle-heading"><div><b>${a.name}${a.required?'<span class="required">*</span>':''}</b><div style="font-size:10px;color:#91a0ad;margin-top:4px">${a.thai}</div></div><small>${photos.length} / 5 รูป</small></div><div class="photo-strip">${photos.length?photos.map((ph,idx)=>`<div class="photo-tile">${icon('image')}<img data-photo="${ph.id}" data-fileid="${ph.fileId||''}" alt="${esc(a.name)} รูปที่ ${idx+1}"><button class="remove-photo" data-remove="${ph.id}" data-angle="${a.id}" aria-label="ลบ ${esc(a.name)} รูปที่ ${idx+1}">×</button><span class="slot">${idx+1} · ${size(ph.size||0)}</span></div>`).join(''):`<div class="photo-empty">${icon('image')}<span>ยังไม่มีภาพ${a.thai}<br>ถ่ายรูปหรือเลือกภาพจากคลัง</span></div>`}</div><div class="angle-actions"><button data-camera="${a.id}" ${photos.length>=MAX_PHOTOS||!isMobileCameraDevice()?'disabled':''}>${icon('camera')}ถ่ายรูป</button><button type="button" data-library="${a.id}" aria-label="เลือกจากคลังรูปภาพ · ${esc(a.name)}" ${photos.length>=MAX_PHOTOS?'disabled':''}>${icon('image')}เลือกจากคลังรูปภาพ</button><input type="file" id="library-${a.id}" accept="image/jpeg,image/png,image/webp" multiple hidden></div></article>`;}).join('')}</div><div class="bottom-bar"><small>JPG, PNG, WebP · สูงสุด 20 MB ต่อรูป<br>เพิ่มรูปแล้วเริ่มอัปโหลดเข้า Drive อัตโนมัติ</small><div class="actions"><span>${isMobileCameraDevice()?'ใช้กล้องโทรศัพท์หรือ iPad':'เปิดหน้านี้บนโทรศัพท์หรือ iPad เพื่อถ่ายรูป'}</span></div></div></div></section>`;
  main.querySelectorAll('[data-camera]').forEach(b=>b.onclick=()=>openCamera(b.dataset.camera));
+ main.querySelectorAll('[data-library]').forEach(button=>{
+  const angle=button.dataset.library,input=$('#library-'+angle);
+  button.onclick=()=>{if(!working)input.click();};
+  input.onchange=()=>{
+   const files=Array.from(input.files);input.value='';
+   if(!files.length||current!==galleryJob||galleryJob.closed)return;
+   run(()=>addPhotos(angle,files));
+  };
+ });
  main.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>confirmRemove(b.dataset.angle,b.dataset.remove));
  hydrateImages();
 }
@@ -341,7 +351,26 @@ function assignPhotographer(p,name){p.fields??={};if(p.fields.photographer!==nam
 async function changePhotographer(p,value){const name=String(value||'').trim();settings.photographer=name;assignPhotographer(p,name);await db.put('settings',settings);p.updatedAt=stamp();await db.put('products',p);}
 async function saveDraft(){current.updatedAt=stamp();await db.put('products',current);}
 
-async function addPhotos(angle,files){const existing=current.photos?.[angle]||[];if(existing.length+files.length>MAX_PHOTOS)throw Error('มุมนี้เหลือ '+(MAX_PHOTOS-existing.length)+' ช่อง กรุณาเลือกไม่เกินจำนวนที่เหลือ');if(!files.length)return;for(const file of files){validatePhotoFile(file);try{const bmp=await createImageBitmap(file);bmp.close();}catch{throw Error('อ่านรูปไม่ได้ กรุณาเลือกไฟล์ JPG, PNG หรือ WebP ที่สมบูรณ์');}}assignPhotographer(current,currentPhotographer());for(const file of files){const id=uid();await db.put('assets',{id,blob:file});existing.push({id,name:file.name||'photo.jpg',size:file.size});}current.photos??={};current.photos[angle]=existing;current.dirty=true;current.pendingRevision=null;await saveDraft();renderDetail();toast('เพิ่ม '+files.length+' รูปแล้ว · เริ่มอัปโหลดเข้า Drive');if(!current.demo)queuePhotoUpload(current);}
+async function addPhotos(angle,files){
+ const job=current;
+ if(!files.length||!job||job.closed)return;
+ const remaining=MAX_PHOTOS-(job.photos?.[angle]?.length||0);
+ if(files.length>remaining)throw Error('มุมนี้เหลือ '+remaining+' ช่อง กรุณาเลือกไม่เกินจำนวนที่เหลือ');
+ for(const file of files){
+  validatePhotoFile(file);
+  try{const bitmap=await createImageBitmap(file);bitmap.close();}
+  catch{throw Error('อ่านรูปไม่ได้ กรุณาเลือกไฟล์ JPG, PNG หรือ WebP ที่สมบูรณ์');}
+ }
+ if(current!==job||job.closed)return;
+ const assets=files.map(blob=>({id:uid(),blob}));
+ const updated=await db.appendPhotos(job.id,angle,assets,currentPhotographer(job));
+ Object.assign(job,updated);
+ if(current===job){
+  renderDetail();
+  toast('เพิ่ม '+files.length+' รูปแล้ว');
+ }
+ if(!job.demo)queuePhotoUpload(job);
+}
 function confirmRemove(angle,id){openModal(modalHeader('นำรูปออกจากมุมนี้')+`<div class="modal-body"><p>รูปจะถูกนำออกจากฉบับร่างนี้ รูปที่เคยบันทึกใน Drive ยังอยู่ในประวัติเดิม</p></div><div class="modal-footer"><button id="cancel-remove">ยกเลิก</button><button class="danger" id="confirm-remove">นำรูปออก</button></div>`);$('#cancel-remove').onclick=closeModal;$('#confirm-remove').onclick=()=>run(async()=>{current.photos[angle]=current.photos[angle].filter(p=>p.id!==id);current.dirty=true;current.pendingRevision=null;await saveDraft();closeModal();renderDetail();});}
 function openCamera(angle){
  if(working)return toast('กำลังบันทึก กรุณารอสักครู่');

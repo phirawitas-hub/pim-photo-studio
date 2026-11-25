@@ -1,6 +1,6 @@
 import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261109refresh';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
-import * as db from './store.mjs?v=20261109refresh';
+import * as db from './store.mjs?v=20261125library';
 import {requireValidImport,productScopeKey,normalizeInventoryStatus} from './import-check.mjs?v=20261120stockstatus';
 let config=null,online=false,title='';
 export const hosted=()=>!!globalThis.google?.script?.run;
@@ -140,7 +140,7 @@ export async function uploadProductPhotos(p,onProgress=()=>{}){
   photo.fileId=asset.fileId||await upload(asset.blob,{key:'photo-'+photo.id,kind:'photo',productId:p.id,angle:a.id,name:photo.name||p.code+'.jpg'});
   await db.put('assets',{...asset,fileId:photo.fileId});
   // Preserve fields and photos edited while the upload was in flight.
-  const latest=await db.get('products',p.id);if(latest){for(const list of Object.values(latest.photos||{}))for(const ph of list)if(ph.id===photo.id)ph.fileId=photo.fileId;await db.put('products',latest);}
+  await db.markPhotoUploaded(p.id,photo.id,photo.fileId);
   done++;onProgress('อัปโหลดรูป '+done+'/'+total,Math.floor(done/total*100));
  }
 }

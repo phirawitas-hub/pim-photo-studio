@@ -88,3 +88,6 @@ body[data-page=settings] main,body[data-page=imports] main{max-width:1100px}
 :root[data-theme=dark] .board-card button.primary{color:#10271c}
 @media(max-width:1100px){.status-board{grid-auto-flow:row;grid-template-columns:1fr}.board-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.board-lane-empty{grid-column:1/-1}}
 @media(max-width:620px){.board-pane .queue-title{flex-wrap:wrap}.board-scopes{margin:12px 0}.board-segment button{padding-inline:13px}.board-pane .queue-tools{margin-top:8px}.board-cards{grid-template-columns:1fr}.board-lane{padding:10px}.board-card .queue-actions button{min-height:44px}}
+
+.gallery .angle-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(155px,100%),1fr));gap:8px}
+.gallery .angle-actions button{width:100%;min-height:44px}

@@ -23,3 +23,14 @@ test('automatic import skips cover/reference sheets and reads the request form w
  assert.equal(selectImportSheet({sheets:[stock]}).index,0);
  assert.throws(()=>selectImportSheet({sheets:[cover]}),/ไม่พบรายการสินค้า/);
 });
+
+test('an unavailable angle satisfies only its own requirement without creating a photo',()=>{
+ const photos=Object.fromEntries(ANGLES.filter(a=>a.required&&a.id!=='right').map(a=>[a.id,[{}]]));
+ const job={photos,fields:{notApplicableAngles:['right','components','top','right']}};
+ assert.deepEqual(progress(job),{required:6,waived:1,handled:7,total:6});
+ assert.deepEqual(validatePhotos(job),[]);
+ assert.equal(status(job),'complete');
+ job.fields.notApplicableAngles=['components'];
+ assert.deepEqual(validatePhotos(job),['Right side']);
+ assert.equal(status(job),'progress');
+});

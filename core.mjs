@@ -11,9 +11,18 @@ export const ANGLES = [
 export const MAX_PHOTOS=5;
 export const uid=()=>crypto.randomUUID();
 export function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-export function progress(p){const groups=p.photos||{};return {required:ANGLES.filter(a=>a.required&&groups[a.id]?.length).length,total:ANGLES.reduce((n,a)=>n+(groups[a.id]?.length||0),0)};}
-export function status(p){if(p.closed)return 'closed';const n=progress(p);return n.required===7?'complete':n.total?'progress':'waiting';}
-export function validatePhotos(p){for(const a of ANGLES){if((p.photos?.[a.id]?.length||0)>MAX_PHOTOS)throw Error(a.name+' เพิ่มได้ไม่เกิน 5 รูป');}return ANGLES.filter(a=>a.required&&!p.photos?.[a.id]?.length).map(a=>a.name);}
+export function angleNotApplicable(p,id){
+ const ids=p.fields?.notApplicableAngles;
+ return !p.photos?.[id]?.length&&Array.isArray(ids)&&ids.includes(id);
+}
+export function progress(p){
+ const required=ANGLES.filter(a=>a.required&&p.photos?.[a.id]?.length).length;
+ const waived=ANGLES.filter(a=>a.required&&angleNotApplicable(p,a.id)).length;
+ const total=ANGLES.reduce((sum,a)=>sum+(p.photos?.[a.id]?.length||0),0);
+ return {required,waived,handled:required+waived,total};
+}
+export function status(p){if(p.closed)return 'closed';const n=progress(p);return n.handled===7?'complete':n.total||n.waived?'progress':'waiting';}
+export function validatePhotos(p){for(const a of ANGLES){if((p.photos?.[a.id]?.length||0)>MAX_PHOTOS)throw Error(a.name+' เพิ่มได้ไม่เกิน 5 รูป');}return ANGLES.filter(a=>a.required&&!p.photos?.[a.id]?.length&&!angleNotApplicable(p,a.id)).map(a=>a.name);}
 export function validatePhotoFile(file){if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw Error('รองรับรูป JPG, PNG และ WebP เท่านั้น');if(file.size>20*1024*1024)throw Error('รูปต้องมีขนาดไม่เกิน 20 MB');if(!file.size)throw Error('ไฟล์รูปว่างเปล่า');}
 export function normalizeHeader(v){return String(v??'').toLowerCase().replace(/[\s_\-().:]/g,'');}
 export function findHeader(rows){for(const row of rows.slice(0,60)){const code=row.cells.findIndex(v=>/itemcode|รหัสสินค้า|^sku$|goodcode/.test(normalizeHeader(v)));const name=row.cells.findIndex(v=>/productname|ชื่อสินค้า|description|goodname/.test(normalizeHeader(v)));if(code>=0&&name>=0)return {row:row.number,code,name,purpose:row.cells.findIndex(v=>/purpose|วัตถุประสงค์/.test(normalizeHeader(v)))};}return {row:rows[0]?.number||1,code:0,name:1,purpose:-1};}

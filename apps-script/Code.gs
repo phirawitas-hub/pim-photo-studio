@@ -206,6 +206,10 @@ function products_(ss,rows) {
   }
   append_(ss,'PIM_Products',added);return true;
 }
+function exemptRequiredAngles_(photos,fields) {
+ const marked=Array.isArray(fields?.notApplicableAngles)?fields.notApplicableAngles:[];
+ return PIM_ANGLES.slice(0,7).filter(id=>!photos[id]?.length&&marked.includes(id));
+}
 function revision_(ss,p) {
   id_(p.id);id_(p.productId);
   const product=table_(ss,'PIM_Products').find(r=>r[0]===p.productId);
@@ -224,7 +228,8 @@ function revision_(ss,p) {
     }
   }
   if(!String(p.meta?.fields?.photographer||'').trim())throw Error('กรุณาระบุชื่อผู้ถ่าย');
-  const at=new Date().toISOString(),complete=PIM_ANGLES.slice(0,7).every(a=>(photos[a]||[]).length>0);
+  const exempt=exemptRequiredAngles_(photos,p.meta?.fields);
+  const at=new Date().toISOString(),complete=PIM_ANGLES.slice(0,7).every(a=>photos[a]?.length||exempt.includes(a));
   const snapCompany=String(product[8]||p.meta?.stockSnapshot?.company||'').trim().toUpperCase();
   const snapLocation=String(product[9]||p.meta?.stockSnapshot?.location||'').trim();
   const snapStatus=normStatus_(product[10]||p.meta?.stockSnapshot?.status||'');
@@ -315,9 +320,9 @@ function writeData_(ss,product,revision,cache){
  const revMeta=revision?JSON.parse(revision[4]||'{}'):null,revSnap=revMeta?.stockSnapshot||null;
  Object.assign(changes,{'PIM Product ID':product[0],'Import ID':product[4],'รหัสสินค้า':product[1],'ชื่อสินค้า':product[2],'วัตถุประสงค์':product[3],'ไฟล์นำเข้า':imported[1],'ลิงก์ไฟล์ต้นฉบับ':'https://drive.google.com/file/d/'+imported[3]+'/view','แท็บต้นฉบับ':product[5],'แถวต้นฉบับ':product[6],'Stock Company':revSnap?.company||product[8]||'','Stock Location':revSnap?.location||product[9]||'','Inventory Status':normStatus_(revSnap?.status||product[10]||''),'On Hand Qty':revSnap?.qty!==undefined&&revSnap?.qty!==''?revSnap.qty:(product[11]??''),'เวลาบันทึกสถานะสต็อก':revSnap?.capturedAt||''});
  if(revision){
-  const meta=revMeta||{},photos=JSON.parse(revision[5]||'{}');let total=0,required=0;
+  const meta=revMeta||{},photos=JSON.parse(revision[5]||'{}');const exempt=exemptRequiredAngles_(photos,meta.fields);let total=0,required=0;
   PIM_ANGLES.forEach((key,n)=>{const list=photos[key]||[];total+=list.length;if(n<7&&list.length)required++;for(let i=0;i<5;i++)changes[DATA_ANGLE_NAMES[n]+' '+(i+1)]=list[i]?'https://drive.google.com/file/d/'+list[i].fileId+'/view':'';});
-  Object.assign(changes,{'วัตถุประสงค์':revision[1]===product[0]?(meta.purpose??product[3]):product[3],'สถานะถ่ายภาพ':required===7?'ถ่ายครบแล้ว':total?'กำลังดำเนินการ':'รอถ่ายรูป','จำนวนรูป':total,'มุมบังคับครบ':required+'/7','อัปเดตล่าสุด':revision[2],'Revision ID':revision[0],'Revision':meta.revisionNumber||productHistory_(ss,product).findIndex(r=>r[0]===revision[0])+1});
+  Object.assign(changes,{'วัตถุประสงค์':revision[1]===product[0]?(meta.purpose??product[3]):product[3],'สถานะถ่ายภาพ':required+exempt.length===7?(exempt.length?'ครบทุกมุมที่ใช้':'ถ่ายครบแล้ว'):total||exempt.length?'กำลังดำเนินการ':'รอถ่ายรูป','จำนวนรูป':total,'มุมบังคับครบ':(required+exempt.length)+'/7'+(exempt.length?' (ยกเว้น '+exempt.length+' มุม)':''),'อัปเดตล่าสุด':revision[2],'Revision ID':revision[0],'Revision':meta.revisionNumber||productHistory_(ss,product).findIndex(r=>r[0]===revision[0])+1});
   for(const [key,name] of Object.entries(DATA_FIELDS))changes[name]=meta.fields?.[key]??'';
   ['physical','inner','outer','delivery'].forEach((key,i)=>['width','length','height','net','gross'].forEach((f,j)=>{changes[['Physical Product','Original Package (Inner)','Original Package (Outer)','Delivery Package'][i]+' · '+['Width (cm)','Length (cm)','Height (cm)','Net Weight (kg)','Gross Weight (kg)'][j]]=meta.dimensions?.[key]?.[f]??'';}));
  }else if(found<0)Object.assign(changes,{'สถานะถ่ายภาพ':'รอถ่ายรูป','จำนวนรูป':0,'มุมบังคับครบ':'0/7'});

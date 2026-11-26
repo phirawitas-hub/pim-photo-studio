@@ -7,3 +7,15 @@ test('Data revision updates same row, has clickable separate Drive links, clears
 test('Data migration ignores incomplete import batches and is repeatable',()=>{const {ctx,ss,s,tables}=fixture();tables.PIM_Products.push(['pending','X','Pending','','missing','Form',9]);ctx.syncData_(ss,{offset:0});ctx.syncData_(ss,{offset:0});assert.equal(s.rows.length,2);});
 
 test('Data migrates ISO timestamps to native dates without changing the saved instant',()=>{const {ctx,ss,s,product,tables}=fixture();tables.PIM_Imports[0][2]='2026-10-22T03:00:00.000Z';ctx.writeData_(ss,product,null,{});const headers=s.rows[0],savedCol=headers.indexOf('วันที่เวลาบันทึก');s.rows[1][savedCol]='2026-10-23T03:57:44.523Z';ctx.writeData_(ss,product,null,{});assert.equal(s.rows[1][savedCol].toISOString(),'2026-10-23T03:57:44.523Z');assert.equal(s.formats.get('2:'+(savedCol+1)),'dd/MM/yyyy HH:mm:ss');assert.equal(s.rows[1][headers.indexOf('วันที่เวลานำเข้าระบบ')].toISOString(),'2026-10-22T03:00:00.000Z');ctx.writeData_(ss,product,null,{});assert.equal(s.rows[1][savedCol].toISOString(),'2026-10-23T03:57:44.523Z');});
+
+test('Data reports six photographed angles plus one exemption without a seventh photo',()=>{
+ const {ctx,ss,s,product}=fixture();
+ const photos=Object.fromEntries(['top','under','left','inner','outer','delivery'].map(id=>[id,[{fileId:id}]]));
+ const meta={fields:{notApplicableAngles:['right','top']}};
+ ctx.writeData_(ss,product,['r1','p1','2026-11-26',true,JSON.stringify(meta),JSON.stringify(photos)],{});
+ const cell=h=>s.rows[1][s.rows[0].indexOf(h)];
+ assert.equal(cell('มุมบังคับครบ'),'7/7 (ยกเว้น 1 มุม)');
+ assert.equal(cell('จำนวนรูป'),6);
+ assert.equal(cell('สถานะถ่ายภาพ'),'ครบทุกมุมที่ใช้');
+ assert.equal(cell('Right side 1'),'');
+});

@@ -1,4 +1,4 @@
-import {MAX_PHOTOS} from './core.mjs';
+import {MAX_PHOTOS,angleNotApplicable} from './core.mjs';
 const ready=new Promise((resolve,reject)=>{const request=indexedDB.open('pim-photo-studio-v1',1);request.onupgradeneeded=()=>{for(const name of ['products','imports','assets','settings'])request.result.createObjectStore(name,{keyPath:'id'});};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
 async function action(name,mode,operation){const db=await ready;return new Promise((resolve,reject)=>{const tx=db.transaction(name,mode);const r=operation(tx.objectStore(name));let result;r.onsuccess=()=>{result=r.result;};tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('พื้นที่เก็บข้อมูลไม่พอ'));});}
 export const get=(name,id)=>action(name,'readonly',s=>s.get(id));
@@ -17,6 +17,7 @@ export async function appendPhotos(productId,angle,assets,photographer){
   read.onsuccess=()=>{
    const job=read.result;
    const photos=job?.photos?.[angle]||[];
+   if(job&&angleNotApplicable(job,angle)){failure=Error('กดกลับมาถ่ายมุมนี้ก่อนเพิ่มรูป');tx.abort();return;}
    if(!job||job.closed||photos.length+assets.length>MAX_PHOTOS){
     failure=Error(!job||job.closed?'งานนี้ถูกปิดหรือลบแล้ว':'จำนวนรูปในมุมนี้เกิน '+MAX_PHOTOS+' รูป');
     tx.abort();return;
@@ -29,6 +30,26 @@ export async function appendPhotos(productId,angle,assets,photographer){
   };
   tx.oncomplete=()=>resolve(updated);
   tx.onabort=()=>reject(failure||tx.error||Error('บันทึกรูปในเครื่องไม่สำเร็จ'));
+ });
+}
+
+export async function setAngleWaiver(productId,angle,waived){
+ const db=await ready;
+ return new Promise((resolve,reject)=>{
+  const tx=db.transaction('products','readwrite'),store=tx.objectStore('products'),read=store.get(productId);
+  let job;
+  read.onsuccess=()=>{
+   job=read.result;
+   if(!job||job.closed||job.photos?.[angle]?.length){tx.abort();return;}
+   job.fields??={};
+   const ids=new Set(job.fields.notApplicableAngles||[]);
+   if(waived)ids.add(angle);else ids.delete(angle);
+   if(ids.size)job.fields.notApplicableAngles=[...ids].sort();else delete job.fields.notApplicableAngles;
+   job.dirty=true;job.pendingRevision=null;job.updatedAt=new Date().toISOString();
+   store.put(job);
+  };
+  tx.oncomplete=()=>resolve(job);
+  tx.onabort=()=>reject(tx.error||Error('สถานะงานหรือรูปในมุมนี้เปลี่ยนแล้ว'));
  });
 }
 

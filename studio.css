@@ -91,3 +91,6 @@ body[data-page=settings] main,body[data-page=imports] main{max-width:1100px}
 
 .gallery .angle-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(155px,100%),1fr));gap:8px}
 .gallery .angle-actions button{width:100%;min-height:44px}
+.gallery .angle-actions .angle-waiver{grid-column:1/-1;width:auto;justify-self:start;background:transparent;color:var(--muted);border-color:var(--line)}
+.gallery .angle-actions .angle-waiver[aria-pressed=true]{background:var(--tint);color:var(--ink)}
+.board-progress i.waived{background:var(--muted)}

@@ -1,4 +1,4 @@
-import {ANGLES,progress} from './core.mjs';
+import {ANGLES,angleNotApplicable,progress} from './core.mjs';
 // Canvas lets the browser shape Thai and system fonts correctly. PDF pages embed
 // high-resolution JPEGs with native clickable Drive link annotations.
 const W=1240,H=1754,M=82,FONT='-apple-system, BlinkMacSystemFont, "Segoe UI", Tahoma, sans-serif';
@@ -101,9 +101,9 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
   }else{
    overflow=limited(product.name,textX,heroY+198,textWidth,25,500,3)||overflow;
   }
-  const complete=count.required===7;
+  const complete=count.handled===7;
   panel(textX,heroY+316,textWidth,48,complete?'#eaf7ef':'#fff5df');
-  line(complete?'ถ่ายครบทั้ง 7 มุมบังคับ':'อยู่ระหว่างถ่ายภาพ',textX+18,heroY+329,21,600,complete?'#237a45':'#946000');
+  line(complete?(count.waived?'ครบทุกมุมที่ใช้ · ยกเว้น '+count.waived+' มุม':'ถ่ายครบทั้ง 7 มุมบังคับ'):'อยู่ระหว่างถ่ายภาพ',textX+18,heroY+329,21,600,complete?'#237a45':'#946000');
   line('Revision '+String(product.revisionNumber||'ฉบับร่าง')+(product.dirty||!product.syncedAt?'  /  ฉบับร่างในเครื่อง':''),textX,heroY+382,18,500,muted);
   y=602;
   const cards=[{x:M,w:240,label:'ภาพทั้งหมด',value:String(count.total)+' รูป'},{x:M+258,w:240,label:'มุมบังคับ',value:count.required+' / 7 มุม'},{x:M+516,w:W-M*2-516,label:'ผู้ถ่ายภาพ',value:product.fields?.photographer||'ยังไม่ระบุ'}];
@@ -116,7 +116,7 @@ export async function createPhotoReport(products,resolvePhoto,onProgress=()=>{})
   fields.forEach(([key,label,unit],i)=>{const x=M+i*col+18;line(label+' ('+unit+')',x,y+18,16,500,muted);const v=dim[key];overflow=limited(v===undefined||v===null||v===''?'—':String(v),x,y+49,col-32,24,600,1)||overflow;});y+=138;
   line('ภาพที่แนบในรายงาน',M,y,22,600);y+=42;
   const half=(W-M*2-24)/2;
-  ANGLES.forEach((a,i)=>{const x=M+(i%2)*(half+24),cy=y+Math.floor(i/2)*63,n=product.photos?.[a.id]?.length||0;panel(x,cy,half,52,'#f7f8fa');line(a.name,x+16,cy+15,18,500);line(String(n)+' รูป',x+half-70,cy+15,18,600,n?blue:muted);});
+  ANGLES.forEach((a,i)=>{const x=M+(i%2)*(half+24),cy=y+Math.floor(i/2)*63,n=product.photos?.[a.id]?.length||0;panel(x,cy,half,52,'#f7f8fa');line(a.name,x+16,cy+15,18,500);line(angleNotApplicable(product,a.id)?'ไม่มีมุมนี้':String(n)+' รูป',x+half-85,cy+15,18,600,n?blue:muted);});
   y+=278;line('บันทึกลงชีตล่าสุด',M,y,17,500,muted);
   line(product.syncedAt?new Date(product.syncedAt).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',hour12:false}):'ยังไม่บันทึก',M,y+29,21,500);
   const snapAt=resolvedStock(product).capturedAt;

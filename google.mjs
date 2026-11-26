@@ -46,7 +46,7 @@ export async function syncImport(batch,products,onProgress=()=>{}){
 }
 function requireCompletePhotos(p){
  const missing=validatePhotos(p);
- if(missing.length)throw Error('กรุณาถ่ายให้ครบ 7 มุม · ยังขาด '+missing.join(', '));
+ if(missing.length)throw Error('กรุณาถ่ายรูปหรือระบุว่าไม่มีมุมนี้ · ยังขาด '+missing.join(', '));
 }
 export async function saveProduct(p,onProgress=()=>{}){
  requireCompletePhotos(p);assertSheet(p);if(!p.dirty&&p.baseRevision)return;
@@ -64,7 +64,7 @@ export async function saveProduct(p,onProgress=()=>{}){
  const snapQty=String(p.liveStockQty!==undefined&&p.liveStockQty!==''?p.liveStockQty:(p.stockQty??'')).trim();
  const meta={fields:p.fields||{},dimensions:p.dimensions||{},purpose:p.purpose||''};
  if(snapCompany||snapLocation||snapStatus)meta.stockSnapshot={company:snapCompany,location:snapLocation,status:snapStatus,qty:snapQty};
- requireCompletePhotos({photos});
+ requireCompletePhotos({photos,fields:meta.fields});
  onProgress('บันทึกเวอร์ชันลง Google Sheet',92);
  const r=await rpc('revision',{id:p.pendingRevision,productId:p.id,baseRevision:p.itemHead||p.baseRevision||null,meta,photos});
  p.baseRevision=r.id;p.itemHead=r.id;p.revisionNumber=r.number;p.newRevision=false;p.pendingRevision=null;p.dirty=false;delete p.remoteUpdate;p.sheetId=config.sheetId;p.syncedAt=r.at;if(r.stockSnapshot){p.stockSnapshot=r.stockSnapshot;p.stockQty=r.stockSnapshot.qty;}await db.put('products',p);

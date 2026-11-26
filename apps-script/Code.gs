@@ -400,13 +400,20 @@ function writeData_(ss,product,revision,cache){
  for(const [h,v] of Object.entries(original)){const col=index[normData_(dataKey_(h))];if(found<0||values[col]==='')changes[h]=v;}
  const revMeta=revision?JSON.parse(revision[4]||'{}'):null,revSnap=revMeta?.stockSnapshot||null;
  Object.assign(changes,{'PIM Product ID':product[0],'Import ID':product[4],'รหัสสินค้า':product[1],'ชื่อสินค้า':product[2],'วัตถุประสงค์':product[3],'ไฟล์นำเข้า':imported[1],'ลิงก์ไฟล์ต้นฉบับ':'https://drive.google.com/file/d/'+imported[3]+'/view','แท็บต้นฉบับ':product[5],'แถวต้นฉบับ':product[6],'Stock Company':revSnap?.company||product[8]||'','Stock Location':revSnap?.location||product[9]||'','Inventory Status':normStatus_(revSnap?.status||product[10]||''),'On Hand Qty':revSnap?.qty!==undefined&&revSnap?.qty!==''?revSnap.qty:(product[11]??''),'เวลาบันทึกสถานะสต็อก':revSnap?.capturedAt||''});
+ const closedRow=table_(ss,'PIM_ClosedJobs').find(r=>r[0]===product[0]);
+ const isClosed=Boolean(closedRow);
  if(revision){
   const meta=revMeta||{},photos=JSON.parse(revision[5]||'{}');const exempt=exemptRequiredAngles_(photos,meta.fields);let total=0,required=0;
   PIM_ANGLES.forEach((key,n)=>{const list=photos[key]||[];total+=list.length;if(n<7&&list.length)required++;for(let i=0;i<5;i++)changes[DATA_ANGLE_NAMES[n]+' '+(i+1)]=list[i]?'https://drive.google.com/file/d/'+list[i].fileId+'/view':'';});
-  Object.assign(changes,{'วัตถุประสงค์':revision[1]===product[0]?(meta.purpose??product[3]):product[3],'สถานะถ่ายภาพ':required+exempt.length===7?(exempt.length?'ครบทุกมุมที่ใช้':'ถ่ายครบแล้ว'):total||exempt.length?'กำลังดำเนินการ':'รอถ่ายรูป','จำนวนรูป':total,'มุมบังคับครบ':(required+exempt.length)+'/7'+(exempt.length?' (ยกเว้น '+exempt.length+' มุม)':''),'อัปเดตล่าสุด':revision[2],'Revision ID':revision[0],'Revision':meta.revisionNumber||productHistory_(ss,product).findIndex(r=>r[0]===revision[0])+1});
+  const photoStatus=isClosed?'ปิดงานแล้ว':required+exempt.length===7?(exempt.length?'ครบทุกมุมที่ใช้':'ถ่ายครบแล้ว'):total||exempt.length?'กำลังดำเนินการ':'รอถ่ายรูป';
+  Object.assign(changes,{'วัตถุประสงค์':revision[1]===product[0]?(meta.purpose??product[3]):product[3],'สถานะถ่ายภาพ':photoStatus,'จำนวนรูป':total,'มุมบังคับครบ':(required+exempt.length)+'/7'+(exempt.length?' (ยกเว้น '+exempt.length+' มุม)':''),'อัปเดตล่าสุด':isClosed?(closedRow[1]||revision[2]):revision[2],'Revision ID':revision[0],'Revision':meta.revisionNumber||productHistory_(ss,product).findIndex(r=>r[0]===revision[0])+1});
   for(const [key,name] of Object.entries(DATA_FIELDS))changes[name]=meta.fields?.[key]??'';
   ['physical','inner','outer','delivery'].forEach((key,i)=>['width','length','height','net','gross'].forEach((f,j)=>{changes[['Physical Product','Original Package (Inner)','Original Package (Outer)','Delivery Package'][i]+' · '+['Width (cm)','Length (cm)','Height (cm)','Net Weight (kg)','Gross Weight (kg)'][j]]=meta.dimensions?.[key]?.[f]??'';}));
- }else if(found<0)Object.assign(changes,{'สถานะถ่ายภาพ':'รอถ่ายรูป','จำนวนรูป':0,'มุมบังคับครบ':'0/7'});
+ }else{
+  Object.assign(changes,{'สถานะถ่ายภาพ':isClosed?'ปิดงานแล้ว':'รอถ่ายรูป','จำนวนรูป':0,'มุมบังคับครบ':'0/7'});
+  if(isClosed&&closedRow[1])changes['อัปเดตล่าสุด']=closedRow[1];
+  else if(found>=0&&values[index[normData_('สถานะถ่ายภาพ')]]==='ปิดงานแล้ว')changes['อัปเดตล่าสุด']='';
+ }
  grow_(s,row,headers.length);
  // Write only owned cells; preserve any formulas/custom columns outside the app.
  const entries=Object.entries(changes).map(([h,v])=>[index[normData_(dataKey_(h))],v]).filter(([c])=>c!==undefined).sort((a,b)=>a[0]-b[0]);
@@ -427,16 +434,17 @@ function writeData_(ss,product,revision,cache){
  return row;
 }
 function syncData_(ss,p){
- const all=table_(ss,'PIM_Products'),done=new Set(table_(ss,'PIM_Imports').map(r=>r[0]));
+ const all=table_(ss,'PIM_Products'),done=new Set(table_(ss,'PIM_Imports').map(r=>r[0])),closedIds=new Set(table_(ss,'PIM_ClosedJobs').map(r=>r[0]));
  const products=all.filter(r=>done.has(r[4])&&(!p.batchId||r[4]===p.batchId));
  const offset=Number(p.offset)||0;if(offset<0||!Number.isInteger(offset))throw Error('ช่วงข้อมูลไม่ถูกต้อง');
  const revisions=table_(ss,'PIM_Revisions'),map=new Map();for(const r of revisions)map.set(r[1],r);
  const cache={},chunk=products.slice(offset,offset+50);for(const product of chunk){
+  const isClosed=closedIds.has(product[0]);
   let selection=table_(ss,'PIM_Selections').filter(r=>r[0]===product[0]).pop();
   let rev=selection?revisions.find(r=>r[0]===selection[1]):map.get(product[0]);
-  if(!selection&&!rev)rev=productHistory_(ss,product).filter(r=>Object.values(JSON.parse(r[5]||'{}')).some(a=>a.length)).pop();
-  if(!selection&&rev){append_(ss,'PIM_Selections',[[product[0],rev[0],new Date().toISOString()]]);}
-  writeData_(ss,product,rev,cache);
+  if(!isClosed&&!selection&&!rev)rev=productHistory_(ss,product).filter(r=>Object.values(JSON.parse(r[5]||'{}')).some(a=>a.length)).pop();
+  if(!isClosed&&!selection&&rev){append_(ss,'PIM_Selections',[[product[0],rev[0],new Date().toISOString()]]);}
+  writeData_(ss,product,rev||null,cache);
  }
  return {count:chunk.length,next:offset+chunk.length<products.length?offset+chunk.length:null,total:products.length};
 }
@@ -572,6 +580,14 @@ function splitPendingStock_(ss){
 function splitPendingStockNow(){
  return pimCall({action:'splitPendingStock'});
 }
+function syncAllDataNow(){
+ let offset=0,total=0;
+ do{
+  const r=pimCall({action:'syncData',payload:{offset}});
+  total=r.total;offset=r.next;
+ }while(offset!==null);
+ return {synced:total};
+}
 function setJobClosed_(ss,p){
  const id=id_(p.productId);
  const job=table_(ss,'PIM_Products').find(r=>r[0]===id);
@@ -580,6 +596,11 @@ function setJobClosed_(ss,p){
  const existing=table_(ss,'PIM_ClosedJobs').find(r=>r[0]===id);
  if(p.closed&&!existing)append_(ss,'PIM_ClosedJobs',[[id,new Date().toISOString()]]);
  if(!p.closed&&existing)removeRows_(ss,'PIM_ClosedJobs',r=>r[0]===id);
+ const revisions=table_(ss,'PIM_Revisions');
+ const selection=table_(ss,'PIM_Selections').filter(r=>r[0]===id).pop();
+ const rev=(selection?revisions.find(r=>r[0]===selection[1]):revisions.filter(r=>r[1]===id).pop())||null;
+ writeData_(ss,job,rev,{});
+ if(typeof SpreadsheetApp!=='undefined'&&typeof SpreadsheetApp.flush==='function')SpreadsheetApp.flush();
  return {productId:id,closed:p.closed};
 }
 function updateJobLocations_(ss,p){

@@ -44,7 +44,8 @@ function pimCall(request) {
   const allowed=['hello','read','upload','sourceRows','sourceMeta','products','finishImport','revision','photo','syncData','stock','validateItems','selectRevision','itemHistory','workspace','option','snapshot','branding','deletePreview','deleteImport','splitPendingStock','updateJobLocations','setJobClosed'];
   if (!allowed.includes(request.action)) throw Error('ไม่รองรับคำสั่งนี้');
   const readOnly=['hello','read','stock','validateItems','itemHistory','photo','snapshot','workspace'].includes(request.action);
-  const lock=readOnly?null:LockService.getScriptLock();
+  const managedLock=request.action==='upload';
+  const lock=(readOnly||managedLock)?null:LockService.getScriptLock();
   if (lock&&!lock.tryLock(30000)) throw Error('มีงานบันทึกอยู่ กรุณาลองใหม่');
   try {
     PIM_TABLE_CACHE={};
@@ -53,15 +54,16 @@ function pimCall(request) {
     if (request.action==='read') return table_(ss,p.name);
     if (request.action==='workspace') return workspace_(ss);
     if (request.action==='snapshot' && p.compact) return listSnapshot_(ss,p);
-    if (request.action==='snapshot') return Object.assign(workspace_(ss),{closedJobs:table_(ss,'PIM_ClosedJobs'),products:table_(ss,'PIM_Products'),revisions:table_(ss,'PIM_Revisions'),selections:table_(ss,'PIM_Selections')});
+    if (request.action==='snapshot') return snapshot_(ss);
     if (request.action==='stock') return stock_(ss,p.code,Array.isArray(p.codes)?new Set(p.codes.map(itemKey_)):null);
     if (request.action==='validateItems') return validateItems_(ss,p.codes);
     if (request.action==='itemHistory') return itemHistory_(ss,p);
     if (request.action==='photo') return photo_(ss,p.fileId,p.thumbnail===true);
     if(request.action==='deletePreview')return deletePreview_(ss,p);
-    schema_(ss);
+    if (request.action==='upload') return upload_(ss,p);
+    ensureSchema_(ss);
     if(request.action!=='deleteImport')assertActiveImport_(ss,request.action,p);
-    if(p.productId&&['revision','upload','selectRevision'].includes(request.action)&&table_(ss,'PIM_ClosedJobs').some(r=>r[0]===p.productId))throw Error('งาน Location นี้ปิดแล้ว กรุณากลับรายการสินค้าแล้วรีเฟรช');
+    if(p.productId&&['revision','selectRevision'].includes(request.action)&&table_(ss,'PIM_ClosedJobs').some(r=>r[0]===p.productId))throw Error('งาน Location นี้ปิดแล้ว กรุณากลับรายการสินค้าแล้วรีเฟรช');
     switch(request.action) {
       case 'deleteImport':return deleteImport_(ss,p);
       case 'setJobClosed':return setJobClosed_(ss,p);
@@ -154,43 +156,122 @@ function append_(ss,name,rows) {
   grow_(s,s.getLastRow()+rows.length,n);
   s.getRange(s.getLastRow()+1,1,rows.length,n).setValues(rows.map(r=>r.map(raw_)));
 }
+function scriptCache_() {
+  try { return typeof CacheService!=='undefined'&&CacheService.getScriptCache?CacheService.getScriptCache():null; } catch { return null; }
+}
+function cacheKey_(prefix,text) {
+  const raw=String(prefix||'')+String(text||'');
+  try {
+    if (typeof Utilities!=='undefined'&&Utilities.computeDigest&&Utilities.DigestAlgorithm?.MD5&&Utilities.base64EncodeWebSafe) {
+      return String(prefix||'')+Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,raw));
+    }
+  } catch {}
+  return raw.replace(/[^\w:-]/g,'_').slice(0,180);
+}
+function ensureSchema_(ss) {
+  const cache=scriptCache_(),key='pim-schema-v3:'+ss.getId();
+  if (cache) {
+    try { if (cache.get(key)==='ok'&&ss.getSheetByName('PIM_Products')&&ss.getSheetByName('PIM_ClosedJobs')) return; } catch {}
+  }
+  schema_(ss);
+  if (cache) { try { cache.put(key,'ok',600); } catch {} }
+}
 function root_(ss) {
   const props=PropertiesService.getUserProperties(),key='pim-root-'+ss.getId(),id=props.getProperty(key);
   if(id) {const f=DriveApp.getFolderById(id);if(!f.isTrashed())return f;}
   const f=DriveApp.createFolder('PIM Photo Studio - '+ss.getName());props.setProperty(key,f.getId());return f;
 }
-function folder_(parent,name) {
-  const found=parent.getFoldersByName(name);return found.hasNext()?found.next():parent.createFolder(name);
+function folder_(parent,name,useLock) {
+  const cache=scriptCache_(),key=cache?cacheKey_('pim-dir:'+(typeof parent.getId==='function'?parent.getId():'')+':',name):'';
+  if (cache&&key) {
+    try {
+      const cachedId=cache.get(key);
+      if (cachedId) {
+        const cached=DriveApp.getFolderById(cachedId);
+        if (cached&&!cached.isTrashed()) return cached;
+      }
+    } catch {}
+  }
+  const found=parent.getFoldersByName(name);
+  if (found.hasNext()) {
+    const f=found.next();
+    if (cache&&key&&typeof f.getId==='function') { try { cache.put(key,f.getId(),21600); } catch {} }
+    return f;
+  }
+  let f;
+  if (useLock&&typeof LockService!=='undefined'&&LockService.getScriptLock) {
+    const lock=LockService.getScriptLock();
+    if (!lock.tryLock(15000)) throw Error('มีงานบันทึกอยู่ กรุณาลองใหม่');
+    try {
+      const retry=parent.getFoldersByName(name);
+      f=retry.hasNext()?retry.next():parent.createFolder(name);
+    } finally {
+      lock.releaseLock();
+    }
+  } else {
+    f=parent.createFolder(name);
+  }
+  if (cache&&key&&typeof f.getId==='function') { try { cache.put(key,f.getId(),21600); } catch {} }
+  return f;
 }
 function upload_(ss,p) {
   id_(p.key);
-  const previous=table_(ss,'PIM_Files').find(r=>r[0]===p.key);
-  if(previous) {if(previous[2]!==p.kind||previous[3]!==(p.productId||'')||previous[4]!==(p.angle||''))throw Error('รหัสไฟล์ซ้ำ');return previous[1];}
   if(!['photo','import'].includes(p.kind))throw Error('ชนิดไฟล์ไม่ถูกต้อง');
   const max=(p.kind==='photo'?20:25)*1024*1024;
   if(typeof p.base64!=='string'||p.base64.length>Math.ceil(max/3)*4||!/^[A-Za-z0-9+/]*={0,2}$/.test(p.base64))throw Error('ไฟล์ใหญ่เกินกำหนดหรือไม่ถูกต้อง');
   const bytes=Utilities.base64Decode(p.base64);if(!bytes.length||bytes.length>max)throw Error('ขนาดไฟล์ไม่ถูกต้อง');
-  let parent=root_(ss);
   if(p.kind==='photo') {
     id_(p.productId);
     if(!PIM_ANGLES.includes(p.angle)||!['image/jpeg','image/png','image/webp'].includes(p.mime))throw Error('มุมภาพหรือชนิดรูปไม่ถูกต้อง');
     const b=bytes.slice(0,12).map(x=>x&255);
     const valid=p.mime==='image/jpeg'?b[0]===255&&b[1]===216:p.mime==='image/png'?b.slice(0,8).join(',')==='137,80,78,71,13,10,26,10':String.fromCharCode.apply(null,b.slice(0,4))==='RIFF'&&String.fromCharCode.apply(null,b.slice(8,12))==='WEBP';
     if(!valid)throw Error('เนื้อหาไฟล์ไม่ตรงกับชนิดรูป');
+  } else {
+    if(!/\.(xlsx|xls|csv)$/i.test(p.name||''))throw Error('รองรับไฟล์ Excel/CSV เท่านั้น');
+  }
+  assertActiveImport_(ss,'upload',p);
+  if(p.productId&&table_(ss,'PIM_ClosedJobs').some(r=>r[0]===p.productId))throw Error('งาน Location นี้ปิดแล้ว กรุณากลับรายการสินค้าแล้วรีเฟรช');
+  const quickPrev=table_(ss,'PIM_Files').find(r=>r[0]===p.key);
+  if(quickPrev) {if(quickPrev[2]!==p.kind||quickPrev[3]!==(p.productId||'')||quickPrev[4]!==(p.angle||''))throw Error('รหัสไฟล์ซ้ำ');return quickPrev[1];}
+  let parent=root_(ss);
+  if(p.kind==='photo') {
     const product=table_(ss,'PIM_Products').find(r=>r[0]===p.productId);if(!product)throw Error('ไม่พบสินค้าในชีต');
     const scopeParts=[product[1],product[8],product[9],product[10]].map(v=>String(v||'').trim()).filter(Boolean);
     const folderName=(scopeParts.join(' - ')+' - '+p.productId).replace(/[\/\\\x00-\x1f]/g,'_').slice(0,180);
-    parent=folder_(folder_(parent,folderName),p.angle);
+    parent=folder_(folder_(parent,folderName,true),p.angle,true);
   } else {
-    if(!/\.(xlsx|xls|csv)$/i.test(p.name||''))throw Error('รองรับไฟล์ Excel/CSV เท่านั้น');
-    parent=folder_(parent,'Imports');
+    parent=folder_(parent,'Imports',true);
   }
   const name=p.key+'__'+String(p.name||'file').replace(/[\/\\\x00-\x1f]/g,'_').slice(0,180);
   // Deterministic name also recovers an upload if the previous response was lost.
   const found=parent.getFilesByName(name);
-  const file=found.hasNext()?found.next():parent.createFile(Utilities.newBlob(bytes,p.mime||'application/octet-stream',name));
-  append_(ss,'PIM_Files',[[p.key,file.getId(),p.kind,p.productId||'',p.angle||'',bytes.length,p.mime||'application/octet-stream']]);
-  return file.getId();
+  const createdNew=!found.hasNext();
+  const file=createdNew?parent.createFile(Utilities.newBlob(bytes,p.mime||'application/octet-stream',name)):found.next();
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(30000)){
+    if(createdNew){try{file.setTrashed(true);}catch{}}
+    throw Error('มีงานบันทึกอยู่ กรุณาลองใหม่');
+  }
+  try {
+    PIM_TABLE_CACHE={};
+    ensureSchema_(ss);
+    assertActiveImport_(ss,'upload',p);
+    if(p.productId&&table_(ss,'PIM_ClosedJobs').some(r=>r[0]===p.productId))throw Error('งาน Location นี้ปิดแล้ว กรุณากลับรายการสินค้าแล้วรีเฟรช');
+    const previous=table_(ss,'PIM_Files').find(r=>r[0]===p.key);
+    if(previous) {
+      if(previous[2]!==p.kind||previous[3]!==(p.productId||'')||previous[4]!==(p.angle||''))throw Error('รหัสไฟล์ซ้ำ');
+      if(createdNew&&file.getId()!==previous[1]){try{file.setTrashed(true);}catch{}}
+      return previous[1];
+    }
+    append_(ss,'PIM_Files',[[p.key,file.getId(),p.kind,p.productId||'',p.angle||'',bytes.length,p.mime||'application/octet-stream']]);
+    return file.getId();
+  } catch(e) {
+    if(createdNew){try{file.setTrashed(true);}catch{}}
+    throw e;
+  } finally {
+    lock.releaseLock();
+    PIM_TABLE_CACHE={};
+  }
 }
 function sourceRows_(ss,p) { id_(p.batchId); return true; }
 function products_(ss,rows) {
@@ -388,7 +469,7 @@ function selectRevision_(ss,p){
  if(!revision)throw Error('Revision ไม่ตรงกับ Item Code หรือสถานะนี้');
  const previous=table_(ss,'PIM_Selections').filter(r=>r[0]===p.productId).pop();
  const at=previous?.[1]===p.revisionId?previous[2]:new Date().toISOString();
- if(previous?.[1]!==p.revisionId)append_(ss,'PIM_Selections',[[p.productId,p.revisionId,at]]);
+ if(previous?.[1]!==p.revisionId){append_(ss,'PIM_Selections',[[p.productId,p.revisionId,at]]);if(typeof SpreadsheetApp!=='undefined'&&typeof SpreadsheetApp.flush==='function')SpreadsheetApp.flush();}
  writeData_(ss,product,revision,{});return {revision,at};
 }
 function stock_(ss,code,codes){
@@ -606,8 +687,16 @@ function workspace_(ss,listStock){
  return {branding:branding_(ss),options:table_(ss,'PIM_Options').filter(r=>r[2]==='yes'),deletions,
   imports:table_(ss,'PIM_Imports').filter(r=>!deleted.has(r[0])),stock:listStock||stock_(ss,''),data:listData_(ss),at:new Date().toISOString()};
 }
+function snapshot_(ss){
+ const importsRaw=table_(ss,'PIM_Imports'),productsRaw=table_(ss,'PIM_Products'),closedJobs=table_(ss,'PIM_ClosedJobs'),selections=table_(ss,'PIM_Selections'),revisions=table_(ss,'PIM_Revisions'),deletionsRaw=table_(ss,'PIM_Deletions');
+ const deleted=new Set(deletionsRaw.map(r=>r[0]));
+ return Object.assign(workspace_(ss),{closedJobs,products:productsRaw.filter(r=>!deleted.has(r[4])),revisions,selections,imports:importsRaw.filter(r=>!deleted.has(r[0]))});
+}
 function listSnapshot_(ss,request){
- const products=table_(ss,'PIM_Products'),revisions=table_(ss,'PIM_Revisions'),selections=table_(ss,'PIM_Selections');
+ // Read tables in reverse write order so concurrent saves or deletions cannot produce a torn snapshot.
+ const importsRaw=table_(ss,'PIM_Imports'),productsRaw=table_(ss,'PIM_Products'),closedJobs=table_(ss,'PIM_ClosedJobs'),selections=table_(ss,'PIM_Selections'),revisions=table_(ss,'PIM_Revisions'),deletionsRaw=table_(ss,'PIM_Deletions');
+ const deleted=new Set(deletionsRaw.map(r=>r[0]));
+ const products=productsRaw.filter(r=>!deleted.has(r[4]));
  const response=workspace_(ss,{rows:[],warnings:[]});
  const batches=new Set(response.imports.map(r=>r[0]));
  const legacy=new Set(products.filter(r=>batches.has(r[4])&&!r[8]&&!r[9]&&!r[10]).map(r=>itemKey_(r[1])));
@@ -617,7 +706,7 @@ function listSnapshot_(ss,request){
  const needed=new Set(Array.isArray(request.bases)?request.bases:[]);
  products.forEach(r=>needed.add(selected.get(r[0])||latest.get(r[0])));
  // Keep short history entries for revision numbering and optimistic concurrency.
- Object.assign(response,{products,selections,closedJobs:table_(ss,'PIM_ClosedJobs'),
+ Object.assign(response,{products,selections,closedJobs,
   revisions:revisions.map(r=>needed.has(r[0])?r:r.slice(0,3))});
  const at=response.at;delete response.at;
  const tags={},parts={};

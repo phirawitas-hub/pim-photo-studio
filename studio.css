@@ -98,3 +98,12 @@ body[data-page=settings] main,body[data-page=imports] main{max-width:1100px}
 }
 .gallery .angle-actions .angle-waiver[aria-pressed=true]{background:var(--tint);color:var(--ink)}
 .board-progress i.waived{background:var(--muted)}
+.completion-status.unsynced{border-color:#f0c37e;background:linear-gradient(135deg,#fffaf0,#fff2db);color:#9a5b00}
+.completion-status.unsynced .completion-status-icon{background:#d4820a}
+:root[data-theme=dark] .completion-status.unsynced{background:linear-gradient(135deg,#382811,#2b2010);border-color:#694819;color:#ffc978}
+.sync-conflict{display:grid;gap:6px;margin-top:8px;color:#bf6800;font-size:12px}
+.sync-conflict-actions,.sync-status-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.detail-conflict-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px;padding:14px 18px;border:1.5px solid #f0b56a;border-radius:16px;background:color-mix(in srgb,#ff9500 10%,var(--surface));font-size:13px;line-height:1.6}
+.detail-conflict-banner b{display:block;color:#a85900}
+.detail-conflict-banner small{display:block;color:var(--muted);font-size:12px}
+:root[data-theme=dark] .detail-conflict-banner b{color:#ffc270}

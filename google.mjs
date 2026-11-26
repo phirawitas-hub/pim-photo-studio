@@ -1,19 +1,32 @@
-import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261109refresh';
+import {bridgeCall,resetBridge,prepareBridge,bridgeAlive} from './bridge.mjs?v=20261126fastsync';
 import {ANGLES,validatePhotos,chunkText,uid} from './core.mjs';
-import * as db from './store.mjs?v=20261125library';
-import {requireValidImport,productScopeKey,normalizeInventoryStatus} from './import-check.mjs?v=20261120stockstatus';
-let config=null,online=false,title='';
+import * as db from './store.mjs?v=20261126fastsync';
+import {requireValidImport,productScopeKey,normalizeInventoryStatus} from './import-check.mjs?v=20261126fastsync';
+let config=null,online=false,title='',snapshotCache=null;
+const RETRYABLE_LOCK_ACTIONS=new Set(['upload','revision','selectRevision','products','sourceMeta','finishImport','splitPendingStock','setJobClosed']);
 export const hosted=()=>!!globalThis.google?.script?.run;
 export const connected=()=>online&&(hosted()||bridgeAlive());
 export function configure(c){config=c;}
 export function warmup(){if(!hosted())prepareBridge().catch(()=>{});}
-export function disconnect(){online=false;resetBridge();}
-function rpc(action,payload={}){
+export function disconnect(){online=false;snapshotCache=null;resetBridge();}
+function rpcOnce(action,payload={}){
  const request={sheetId:config?.sheetId||'',action,payload},timeoutMs=action==='snapshot'?45000:180000;
  if(!hosted())return bridgeCall(request,timeoutMs).catch(e=>{if(e.code==='CONNECTION')online=false;throw e;});
  return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Google ตอบกลับช้า ยังแสดงข้อมูลเดิม กรุณารีเฟรชอีกครั้ง')),timeoutMs);google.script.run.withSuccessHandler(value=>{clearTimeout(timer);resolve(value);}).withFailureHandler(e=>{clearTimeout(timer);reject(Error(e.message||String(e)));}).pimCall(request);});
 }
-export async function connect(c,usePopup=false){configure(c);online=false;if(usePopup&&!hosted())await prepareBridge(true);const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);online=true;}
+async function rpc(action,payload={}){
+ for(let attempt=0;;attempt++){
+  try{
+   return await rpcOnce(action,payload);
+  }catch(e){
+   const retryable=RETRYABLE_LOCK_ACTIONS.has(action)&&e?.code!=='CONNECTION'&&/มีงานบันทึกอยู่/.test(e?.message||'');
+   if(!retryable||attempt>=2)throw e;
+   const delay=900+attempt*1000+Math.floor(Math.random()*600);
+   await new Promise(resolve=>typeof setTimeout==='function'?setTimeout(resolve,delay):resolve());
+  }
+ }
+}
+export async function connect(c,usePopup=false){configure(c);online=false;snapshotCache=null;if(usePopup&&!hosted())await prepareBridge(true);const r=await rpc('hello');title=r.title;config.sheetId=r.sheetId;await db.put('settings',config);online=true;}
 export async function syncData(batchId,report=()=>{}){let offset=0;do{const r=await rpc('syncData',{batchId,offset});offset=r.next;report(r.next??r.total,r.total);}while(offset!==null);}
 export async function checkConnection(){return title;}
 export async function readTable(name){return rpc('read',{name});}
@@ -90,9 +103,13 @@ export async function loadProducts(fresh){
  }
  return mapped.map(p=>{
   const scope=scopeById.get(p.id),history=historyByScope.get(scope)||[],selection=selected.get(p.id);
-  const revision=selection?byId.get(selection[1]):latest.get(p.id);
-  applyRevision(p,revision&&scopeById.get(revision[1])===scope?revision:null,history);
-  p.syncedAt=selection?.[2]||p.syncedAt;p.importSynced=true;return p;
+  const selectedRev=selection?byId.get(selection[1]):null;
+  const validSelected=selectedRev&&scopeById.get(selectedRev[1])===scope?selectedRev:null;
+  const ownLatest=latest.get(p.id);
+  const validLatest=ownLatest&&scopeById.get(ownLatest[1])===scope?ownLatest:null;
+  const revision=validSelected||validLatest||null;
+  applyRevision(p,revision,history);
+  p.syncedAt=(validSelected?selection[2]:null)||p.syncedAt;p.importSynced=true;return p;
  });
 }
 export async function photoBlob(fileId,thumbnail=false){
@@ -103,7 +120,7 @@ export async function photoBlob(fileId,thumbnail=false){
 export const workspace=()=>rpc('workspace');
 export const changeOption=(kind,value,operation)=>rpc('option',{kind,value,operation});
 
-let snapshotCache=null;
+export function clearSnapshotCache(){snapshotCache=null;}
 export async function snapshot(bases=[]){
  const sheet=config?.sheetId,previous=snapshotCache?.sheet===sheet?snapshotCache:null;
  const result=await rpc('snapshot',{compact:true,bases,tags:previous?.tags||{}});
@@ -128,19 +145,33 @@ export async function deleteImport(batchId,confirmName,onProgress=()=>{}){
  }while(!result.deleted);
 }
 
-export async function uploadProductPhotos(p,onProgress=()=>{}){
+export async function uploadProductPhotos(p,onProgress=()=>{},concurrency=3){
  assertSheet(p);
  const batch=await db.get('imports',p.importId);
  if(batch&&!batch.synced)await syncImport(batch,(await db.all('products')).filter(x=>x.importId===batch.id),message=>onProgress(message,0));
  const slots=ANGLES.flatMap(a=>(p.photos?.[a.id]||[]).map(photo=>({a,photo}))),total=slots.length;
  let done=slots.filter(x=>x.photo.fileId).length;onProgress('อัปโหลดรูป '+done+'/'+total,total?Math.floor(done/total*100):100);
- for(const {a,photo} of slots){
-  if(photo.fileId)continue;
-  const asset=await db.get('assets',photo.id);if(!asset?.blob&&!asset?.fileId)throw Error('ไม่พบไฟล์รูปต้นฉบับ กรุณาเลือกรูปใหม่');
-  photo.fileId=asset.fileId||await upload(asset.blob,{key:'photo-'+photo.id,kind:'photo',productId:p.id,angle:a.id,name:photo.name||p.code+'.jpg'});
-  await db.put('assets',{...asset,fileId:photo.fileId});
-  // Preserve fields and photos edited while the upload was in flight.
-  await db.markPhotoUploaded(p.id,photo.id,photo.fileId);
-  done++;onProgress('อัปโหลดรูป '+done+'/'+total,Math.floor(done/total*100));
+ const pending=slots.filter(x=>!x.photo.fileId);
+ if(!pending.length)return;
+ const workers=Math.min(Math.max(1,concurrency),pending.length);
+ let cursor=0,firstError=null;
+ async function runWorker(){
+  while(!firstError){
+   const idx=cursor++;if(idx>=pending.length)return;
+   const {a,photo}=pending[idx];
+   try{
+    const asset=await db.get('assets',photo.id);if(!asset?.blob&&!asset?.fileId)throw Error('ไม่พบไฟล์รูปต้นฉบับ กรุณาเลือกรูปใหม่');
+    photo.fileId=asset.fileId||await upload(asset.blob,{key:'photo-'+photo.id,kind:'photo',productId:p.id,angle:a.id,name:photo.name||p.code+'.jpg'});
+    await db.put('assets',{...asset,fileId:photo.fileId});
+    // Preserve fields and photos edited while the upload was in flight.
+    await db.markPhotoUploaded(p.id,photo.id,photo.fileId);
+    done++;onProgress('อัปโหลดรูป '+done+'/'+total,Math.floor(done/total*100));
+   }catch(e){
+    if(!firstError)firstError=e;
+    return;
+   }
+  }
  }
+ await Promise.all(Array.from({length:workers},()=>runWorker()));
+ if(firstError)throw firstError;
 }

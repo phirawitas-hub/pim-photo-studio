@@ -14,13 +14,18 @@ export function hasLocalEdits(local,remote,revisions=[]){
  if(local.newRevision)return true;
  if(local.baseRevision){
   const base=revisions.find(r=>r[0]===local.baseRevision);
-  if(!base)return true; // Unknown history is never permission to discard a draft.
-  const meta=JSON.parse(base[4]||'{}');
-  return productContent(local)!==productContent({fields:meta.fields||{},dimensions:meta.dimensions||{},purpose:meta.purpose??remote.purpose,photos:JSON.parse(base[5]||'{}')});
+  if(!base||base.length<6)return true; // Unknown or truncated history is never permission to discard a draft.
+  const meta=JSON.parse(base[4]||'{}'),basePhotos=JSON.parse(base[5]||'{}');
+  if(remote?.baseRevision&&remote.baseRevision!==local.baseRevision){
+   const localFields={...local.fields};delete localFields.photographer;
+   const baseFields={...(meta.fields||{})};delete baseFields.photographer;
+   return productContent({...local,fields:localFields})!==productContent({fields:baseFields,dimensions:meta.dimensions||{},purpose:meta.purpose??remote.purpose,photos:basePhotos});
+  }
+  return productContent(local)!==productContent({fields:meta.fields||{},dimensions:meta.dimensions||{},purpose:meta.purpose??remote.purpose,photos:basePhotos});
  }
  // Imported jobs used to be marked dirty even before any photography or edits.
  const fields={...local.fields};delete fields.photographer;
- return productContent({...local,fields})!==productContent({fields:{},dimensions:{},photos:{},purpose:remote.purpose});
+ return productContent({...local,fields})!==productContent({fields:{},dimensions:{},photos:{},purpose:local.purpose||''});
 }
 export function reconcileProduct(local,remote,revisions=[]){
  if(!local)return remote;

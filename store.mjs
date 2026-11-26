@@ -22,7 +22,7 @@ export async function appendPhotos(productId,angle,assets,photographer){
     failure=Error(!job||job.closed?'งานนี้ถูกปิดหรือลบแล้ว':'จำนวนรูปในมุมนี้เกิน '+MAX_PHOTOS+' รูป');
     tx.abort();return;
    }
-   const added=assets.map(({id,blob})=>({id,name:blob.name||'photo.jpg',size:blob.size}));
+   const added=assets.map(({id,blob,name})=>({id,name:name||blob.name||'photo.jpg',size:blob.size}));
    updated={...job,photos:{...job.photos,[angle]:[...photos,...added]},fields:{...job.fields,photographer},
     updatedAt:new Date().toISOString(),dirty:true,pendingRevision:null};
    for(const asset of assets)tx.objectStore('assets').add(asset);
@@ -73,15 +73,16 @@ export async function deleteBatch(batchId){
 }
 
 // Read and merge in one transaction so a draft edited during the network request wins.
-export async function mergeCloudProducts(rows,merge,preserveId){
+export async function mergeCloudProducts(rows,merge,preserveId,canDelete){
  const connection=await ready;return new Promise((resolve,reject)=>{
   const tx=connection.transaction('products','readwrite'),store=tx.objectStore('products'),remoteIds=new Set(rows.map(r=>r.id));let updated=0;
+  const removable=typeof canDelete==='function'?canDelete:local=>local.importSynced&&!local.demo&&!local.dirty;
   const allReq=store.getAll();
   allReq.onsuccess=()=>{
    try{
     const localMap=new Map(allReq.result.map(x=>[x.id,x]));
     for(const local of allReq.result){
-     if(local.importSynced&&!local.demo&&!local.dirty&&local.id!==preserveId&&!remoteIds.has(local.id)){store.delete(local.id);updated++;}
+     if(!local.demo&&local.id!==preserveId&&!remoteIds.has(local.id)&&removable(local)){store.delete(local.id);updated++;}
     }
     for(const remote of rows){
      const local=localMap.get(remote.id);

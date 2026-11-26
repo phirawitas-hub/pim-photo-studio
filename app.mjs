@@ -1,5 +1,5 @@
 import {startAutoUpdate} from './auto-update.mjs';
-import {reconcileProduct,singleFlight} from './sync.mjs?v=20261120jobclose';
+import {reconcileProduct,hasLocalEdits,singleFlight} from './sync.mjs?v=20261126fastsync';
 import {itemCodeKey,stockSlotKey,hasStockScope,stockLabel,normalizeInventoryStatus,reviewImportProducts,requireValidImport} from './import-check.mjs?v=20261120stockstatus';
 import {selectImportSheet} from './importer.mjs?v=20261109simple';
 import {openNativeCamera,cancelNativeCamera,isMobileCameraDevice} from './camera.mjs?v=20261109native';
@@ -9,9 +9,10 @@ import {initTheme} from './theme.mjs?v=20261103clean';
 initTheme();
 import {SCRIPT_URL} from './deployment.mjs';
 import {ANGLES,MAX_PHOTOS,uid,esc,progress,status,angleNotApplicable,validatePhotos,validatePhotoFile,mappedProducts,safeId} from './core.mjs?v=20261120jobclose';
-import * as db from './store.mjs?v=20261125library';
-import * as cloud from './google.mjs?v=20261125library';
+import * as db from './store.mjs?v=20261126fastsync';
+import * as cloud from './google.mjs?v=20261126fastsync';
 import {openPhotoViewer} from './viewer.mjs?v=20261120studio';
+import {optimizePhoto} from './photo-optimize.mjs?v=20261126fastsync';
 cloud.warmup();
 const $=s=>document.querySelector(s),main=$('#main'),modal=$('#modal'),modalContent=$('#modal-content');
 const paths={grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',camera:'M4 6h4l2-3h5l2 3h3v15H4z M16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',import:'M12 3v12 m-5-5 5 5 5-5 M4 15v6h16v-6',export:'M12 16V3 m-5 5 5-5 5 5 M4 15v6h16v-6',settings:'M9 3h6l1 4 4 1v7l-4 1-1 4H9l-1-4-4-1V8l4-1z M15 11.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0',menu:'M5 6h14 M5 12h10 M5 18h14',search:'M16 10a6 6 0 1 1-12 0 6 6 0 0 1 12 0 M15 15l6 6',check:'m5 12 4 4L19 6',clock:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 7v5l3 2',refresh:'M20 7a9 9 0 1 0 1 8 M20 3v5h-5',arrow:'M5 12h14 m-5-5 5 5-5 5',back:'M19 12H5 m5-5-5 5 5 5',image:'M3 3h18v18H3z m0 14 6-6 4 4 3-3 5 5 M15 7h.01',cloud:'M7 19H5a4 4 0 0 1-1-8 7 7 0 0 1 14-2 5 5 0 0 1 1 10h-2 M12 21V11 m-4 4 4-4 4 4',file:'M6 2h8l5 5v15H6z M14 2v6h5 M9 12h7 M9 16h7',close:'m6 6 12 12 M6 18 18 6',link:'m10 13 4-4 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M13 7l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0',info:'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 11v6 M12 7v.01',box:'m12 3 9 5v9l-9 5-9-5V8z M3 8l9 5 9-5 M12 13v9 M7 5l10 6'};
@@ -63,12 +64,82 @@ async function run(fn){
  }catch(e){busy('');toast(e.message||String(e),true);}
  finally{working=false;document.body.removeAttribute('aria-busy');updateConnection();}
 }
-const photoUploads=new Map();
+const photoUploads=new Map(),uploadAgain=new Set(),savingProducts=new Map();
 function uploadStatus(message,percent){clearTimeout(uploadStatus.timer);let box=$('#upload-status');if(!box){box=document.createElement('div');box.id='upload-status';box.setAttribute('role','status');document.body.append(box);}box.innerHTML='<span>'+esc(message)+'</span>'+(Number.isFinite(percent)?'<b>'+percent+'%</b><progress max="100" value="'+percent+'" aria-label="อัปโหลดรูปตามจำนวนที่บันทึกสำเร็จ"></progress>':'');if(percent===100)uploadStatus.timer=setTimeout(()=>box.remove(),5000);}
+function saveProductLocked(productId,onProgress=()=>{}){
+ if(savingProducts.has(productId))return savingProducts.get(productId);
+ const promise=(async()=>{
+  const latest=await db.get('products',productId);
+  if(!latest||latest.demo||(!latest.dirty&&latest.baseRevision))return latest;
+  await cloud.saveProduct(latest,onProgress);
+  if(current?.id===productId)Object.assign(current,latest);
+  return latest;
+ })();
+ savingProducts.set(productId,promise);
+ promise.finally(()=>{if(savingProducts.get(productId)===promise)savingProducts.delete(productId);});
+ return promise;
+}
 function queuePhotoUpload(p){
- const previous=photoUploads.get(p.id)||Promise.resolve();
- const task=previous.catch(()=>{}).then(async()=>{const latest=await db.get('products',p.id);if(!latest||latest.demo)return;if(!cloud.connected()){uploadStatus('ยังไม่เชื่อม Google · เก็บรูปไว้ในเครื่อง รออัปโหลด');return;}await cloud.uploadProductPhotos(latest,(message,percent)=>uploadStatus(message,percent));for(const list of Object.values(p.photos||{}))for(const ph of list){const uploaded=Object.values(latest.photos||{}).flat().find(x=>x.id===ph.id);if(uploaded?.fileId)ph.fileId=uploaded.fileId;}if(current===p&&progress(p).handled===7&&p.fields?.photographer?.trim()){await saveDraft();await cloud.saveProduct(p,(message,percent)=>uploadStatus(message,percent));uploadStatus('อัปโหลดและบันทึกสำเร็จ',100);await reloadLocal();if(current!==p)return;const next=nextPendingSibling(p);if(next){location.hash='product/'+next.id;toast('บันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}else{location.hash='products';toast('บันทึกสำเร็จ 100% · กลับรายการสินค้า');}}});
- photoUploads.set(p.id,task);task.catch(e=>{uploadStatus('อัปโหลดไม่สำเร็จ · รูปยังอยู่ในเครื่อง');toast(e.message,true);}).finally(()=>{if(photoUploads.get(p.id)===task)photoUploads.delete(p.id);});return task;
+ const id=typeof p==='string'?p:p?.id;if(!id)return Promise.resolve();
+ if(photoUploads.has(id)){uploadAgain.add(id);return photoUploads.get(id);}
+ const task=(async()=>{
+  while(true){
+   uploadAgain.delete(id);
+   const latest=await db.get('products',id);
+   if(!latest||latest.demo||latest.closed)break;
+   if(!cloud.connected()){uploadStatus('ยังไม่เชื่อม Google · เก็บรูปไว้ในเครื่อง รออัปโหลด');break;}
+   await cloud.uploadProductPhotos(latest,(message,percent)=>uploadStatus(message,percent));
+   if(current?.id===id){
+    for(const list of Object.values(current.photos||{}))for(const ph of list){
+     const uploaded=Object.values(latest.photos||{}).flat().find(x=>x.id===ph.id);
+     if(uploaded?.fileId)ph.fileId=uploaded.fileId;
+    }
+   }
+   if(uploadAgain.has(id))continue;
+   const afterUpload=await db.get('products',id);
+   if(afterUpload&&!afterUpload.demo&&!afterUpload.closed&&afterUpload.dirty&&!afterUpload.remoteUpdate&&progress(afterUpload).handled===7&&afterUpload.fields?.photographer?.trim()){
+    const wasCurrent=current?.id===id;
+    await saveProductLocked(id,(message,percent)=>uploadStatus(message,percent));
+    uploadStatus('อัปโหลดและบันทึกสำเร็จ',100);
+    if(wasCurrent&&current?.id===id)rememberCapture(current);
+    await reloadLocal();
+    await refreshCloudFresh(true).catch(()=>{});
+    await reloadLocal();
+    if(wasCurrent&&current?.id===id){
+     const next=nextPendingSibling(afterUpload);
+     if(next){location.hash='product/'+next.id;toast('บันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}
+     else{location.hash='products';toast('บันทึกสำเร็จ 100% · กลับรายการสินค้า');}
+    }else if(!current&&$('#table-area')){
+     refreshProductView();
+    }
+   }
+   if(!uploadAgain.has(id))break;
+  }
+ })();
+ photoUploads.set(id,task);
+ task.catch(e=>{uploadStatus('อัปโหลดหรือบันทึกไม่สำเร็จ · รูปยังอยู่ในเครื่อง');toast(e.message,true);updateSyncStatus();}).finally(()=>{if(photoUploads.get(id)===task)photoUploads.delete(id);});
+ return task;
+}
+async function flushUnsavedDrafts(manual=false){
+ if(!cloud.connected())return 0;
+ const drafts=(await db.all('products')).filter(p=>!p.demo&&!p.closed&&p.dirty&&!p.remoteUpdate&&(progress(p).total>0||progress(p).waived>0));
+ if(!drafts.length){if(manual)toast('ไม่มีฉบับร่างค้างอัปโหลด');return 0;}
+ if(!manual){
+  for(const d of drafts)if(!photoUploads.has(d.id))queuePhotoUpload(d);
+  return 0;
+ }
+ let synced=0,missingPhotographer=0;
+ busy('กำลังอัปโหลดและบันทึกฉบับร่าง '+drafts.length+' งาน');
+ for(const d of drafts){
+  await queuePhotoUpload(d);
+  const latest=await db.get('products',d.id);
+  if(latest&&!latest.dirty)synced++;
+  else if(latest&&progress(latest).handled===7&&!latest.fields?.photographer?.trim())missingPhotographer++;
+ }
+ await refreshCloudFresh(true);
+ if(missingPhotographer)toast('มีงานครบ 7 มุมที่ยังไม่ได้ระบุชื่อผู้ถ่าย '+missingPhotographer+' รายการ กรุณาเปิดรายการเพื่อระบุผู้ถ่ายก่อนบันทึก',true);
+ else toast('บันทึกฉบับร่างขึ้นชีต '+synced+' รายการแล้ว');
+ return synced;
 }
 
 function fmtDate(v){return v?new Date(v).toLocaleString('en-GB',{timeZone:'Asia/Bangkok',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'—';}
@@ -76,7 +147,7 @@ function size(n){return n>=1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/102
 function stamp(){return new Date().toISOString();}
 function updateConnection(){const ok=cloud.connected();$('#connection-label').textContent=ok?'บันทึกลง Google ได้':(autoConnecting?'กำลังเชื่อมต่อ Google':'Google ยังไม่เชื่อมต่อ');$('#connect-top').classList.toggle('online',ok);const badge=$('#google-state');if(badge){badge.textContent=ok?'เชื่อมต่อแล้ว':(autoConnecting?'กำลังเชื่อมต่อ':'รอเชื่อมต่ออัตโนมัติ');badge.className='badge '+(ok?'complete':'neutral');}const recovery=$('#google-recovery');if(recovery)recovery.hidden=ok;}
 function title(eyebrow,heading,sub,actions=''){return `<div class="page-heading"><div><h1>${heading}</h1><p class="subtext">${sub}</p></div><div class="actions">${actions}</div></div>`;}
-function badge(p){const s=status(p);if(s==='closed')return '<span class="badge closed-job">ปิดงานแล้ว</span>';if(s==='complete')return '<span class="completion-status"><span class="completion-status-icon">'+icon('check')+'</span><span><b>'+ (progress(p).waived?'ดำเนินการครบแล้ว':'ถ่ายครบแล้ว')+'</b><small>7 / 7 มุมครบถ้วน</small></span></span>';return '<span class="badge '+s+'">'+({waiting:'รอถ่ายรูป',progress:'กำลังดำเนินการ'}[s])+'</span>';}
+function badge(p){const s=status(p);if(s==='closed')return '<span class="badge closed-job">ปิดงานแล้ว</span>';if(s==='complete'&&p.dirty&&!p.demo)return '<span class="completion-status unsynced"><span class="completion-status-icon">'+icon('clock')+'</span><span><b>ครบ 7 มุม · รอบันทึก</b><small>ยังไม่ส่งขึ้นชีต</small></span></span>';if(s==='complete')return '<span class="completion-status"><span class="completion-status-icon">'+icon('check')+'</span><span><b>'+ (progress(p).waived?'ดำเนินการครบแล้ว':'ถ่ายครบแล้ว')+'</b><small>7 / 7 มุมครบถ้วน</small></span></span>';return '<span class="badge '+s+'">'+({waiting:'รอถ่ายรูป',progress:'กำลังดำเนินการ'}[s])+'</span>';}
 function stockStatusClass(v){const s=normalizeInventoryStatus(v).toUpperCase();return ({GOOD:'good',DAMAGE:'damage',INCOMPLETE:'incomplete',DISPOSAL:'disposal',QC:'qc',HOLD:'hold',BORROW:'borrow'})[s]||'neutral';}
 function stockStatusBadge(v){const label=normalizeInventoryStatus(v);return label?'<span class="inv-status inv-'+stockStatusClass(label)+'">'+esc(label)+'</span>':'';}
 function stockStatusOptions(){const order=['Good','Damage','Incomplete','Disposal','QC','Hold','Borrow'];const found=[...new Set(products.map(p=>normalizeInventoryStatus(p.stockStatus)).filter(Boolean))];return found.sort((a,b)=>{const ia=order.indexOf(a),ib=order.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);});}
@@ -117,7 +188,7 @@ window.addEventListener('beforeunload',event=>{
  event.preventDefault();event.returnValue='';
 });
 async function route(){
- cancelNativeCamera();await reloadLocal();
+ cancelNativeCamera();const prevId=current?.id||null;await reloadLocal();
  let r=location.hash.slice(1).split('/');
  const active=current||restoredCapture(),missing=missingCaptureAngles(active);
  if(missing.length&&(r[0]!=='product'||r[1]!==active.id)){
@@ -125,7 +196,10 @@ async function route(){
   history.replaceState(history.state,'','#'+r.join('/'));
   toast(missingAngleMessage(missing),true);
  }
- document.body.dataset.page=r[0]||'products';if(r[0]!=='product')current=null;document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===(r[0]==='product'?'products':r[0]||'products')));document.querySelectorAll('.nav-group').forEach(g=>{if(g.querySelector('a.active'))g.open=true;});if(r[0]==='product'){current=current?.id===r[1]?current:products.find(p=>p.id===r[1]);section=r[2]||'gallery';if(!current){rememberCapture(null);location.hash='products';toast('ไม่พบสินค้า',true);return;}renderDetail();}else if(r[0]==='summary')renderSummary();else if(r[0]==='imports')renderImports();else if(r[0]==='settings')renderSettings();else renderProducts();updatePageHeading();updateConnection();}
+ const leftProduct=!!prevId&&r[0]!=='product';
+ document.body.dataset.page=r[0]||'products';if(r[0]!=='product')current=null;document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===(r[0]==='product'?'products':r[0]||'products')));document.querySelectorAll('.nav-group').forEach(g=>{if(g.querySelector('a.active'))g.open=true;});if(r[0]==='product'){current=current?.id===r[1]?current:products.find(p=>p.id===r[1]);section=r[2]||'gallery';if(!current){rememberCapture(null);location.hash='products';toast('ไม่พบสินค้า',true);return;}renderDetail();}else if(r[0]==='summary')renderSummary();else if(r[0]==='imports')renderImports();else if(r[0]==='settings')renderSettings();else renderProducts();updatePageHeading();updateConnection();
+ if(leftProduct&&cloud.connected()&&!syncing)refreshCloud(true).catch(()=>{});
+}
 window.addEventListener('hashchange',()=>route().catch(e=>toast(e.message,true)));
 function renderProducts(){
  const invStatuses=stockStatusOptions();
@@ -185,7 +259,7 @@ function bindJobClose(container){
    const saved=await db.get('products',p.id);
    if(saved)await db.put('products',{...saved,closed});
    if(current?.id===p.id)current.closed=closed;
-   closeModal();await reloadLocal();
+   closeModal();await refreshCloudFresh(true).catch(()=>{});await reloadLocal();
    if(current)renderDetail();else renderProducts();
    toast((closed?'ปิดงานแล้ว':'เปิดงานอีกครั้งแล้ว')+' · '+(p.stockLocation||p.code));
   });
@@ -204,7 +278,7 @@ function boardCard(p){
  <div class="board-card-title"><span class="board-photo list-photo">${icon('camera')}${cover}</span><div><strong>${esc(p.code)}</strong><div>${esc(p.name)}</div></div></div>
  ${listMetadata(p)}<div class="board-progress"><span aria-hidden="true">${marks}</span><small>${n.handled}/7 มุม${n.waived?' · ยกเว้น '+n.waived+' มุม':''} · ${n.total} รูป</small></div></a>
  ${p.dirty?'<small class="draft-indicator">ฉบับร่างในเครื่อง · ยังไม่บันทึก</small>':''}
- ${p.remoteUpdate?`<button data-cloud-view="${id}">ดูรูปจากชีตที่อัปเดต</button>`:''}${queueActions(p)}</article>`;
+ ${p.remoteUpdate?`<div class="sync-conflict">ชีตมีข้อมูลชุดใหม่${status(p.remoteUpdate)==='complete'?' (ครบ 7/7)':''}<span class="sync-conflict-actions"><button type="button" data-cloud-view="${id}">ดูรูปจากชีต</button><button type="button" class="primary" data-cloud-accept="${id}">ใช้ข้อมูลจากชีต</button></span></div>`:''}${queueActions(p)}</article>`;
 }
 function renderTable(){
  const today=todayInBangkok(),match=filteredProducts(today);
@@ -232,21 +306,36 @@ function renderTable(){
   container.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>location.hash='product/'+b.dataset.open);
  container.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.view);if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl,thumbnailUrl});});
  container.querySelectorAll('[data-cloud-view]').forEach(b=>b.onclick=()=>{const p=products.find(x=>x.id===b.dataset.cloudView)?.remoteUpdate;if(p)openPhotoViewer(p,{modal,openModal,modalHeader,photoUrl,thumbnailUrl});});
+ container.querySelectorAll('[data-cloud-accept]').forEach(b=>b.onclick=()=>run(()=>acceptCloudVersion(b.dataset.cloudAccept)));
  container.querySelectorAll('[data-product-pdf]').forEach(b=>b.onclick=()=>{if(working)return toast('กำลังสร้างไฟล์ กรุณารอสักครู่');const p=products.find(x=>x.id===b.dataset.productPdf);if(p){openReportPicker([p]);$('#make-pdf').click();}});
  bindJobClose(container);
  }
  bindActions(main);hydrateListPhotos();
 }
 async function addDemo(){let p=products.find(p=>p.demo);if(!p){p={id:uid(),code:'DEMO-001',name:'สินค้าตัวอย่างสำหรับทดลองถ่ายรูป',purpose:'ข้อมูลสมมติ • ทดลองใช้งาน',demo:true,createdAt:stamp(),photos:{},fields:{},dimensions:{},dirty:true};await db.put('products',p);}location.hash='product/'+p.id;}
+async function acceptCloudVersion(productId){
+ const local=await db.get('products',productId);
+ if(!local?.remoteUpdate)return;
+ const accepted={...local.remoteUpdate,importSynced:true};
+ delete accepted.remoteUpdate;
+ await db.put('products',accepted);
+ await reloadLocal();
+ if(current?.id===productId){current=products.find(x=>x.id===productId)||accepted;rememberCapture(current);renderDetail();}
+ else refreshProductView();
+ toast('อัปเดตเป็นข้อมูลล่าสุดจากชีตแล้ว');
+}
 function renderDetail(){
  rememberCapture(current);
  const p=current,n=progress(p),sibs=siblingProducts(p),sibIndex=sibs.findIndex(x=>x.id===p.id)+1,snap=p.stockSnapshot||null;
  const stCompany=snap?.company||p.stockCompany||'',stLocation=snap?.location||p.stockLocation||'',stStatus=normalizeInventoryStatus(snap?.status||p.stockStatus||''),stQty=snap?.qty!==undefined&&snap?.qty!==''?snap.qty:(p.stockQty??'');
  const scoped=Boolean(stCompany||stLocation||stStatus);
  const scopeBar=scoped?`<div class="detail-stock-scope">${stockStatusBadge(stStatus)}<span class="scope-loc">${esc([stCompany,stLocation].filter(Boolean).join(' · ')||'ไม่ระบุ Location')}</span>${stQty!==''&&stQty!==undefined?`<span class="scope-qty">Qty ${esc(stQty)}</span>`:''}${sibs.length>1?`<span class="scope-count">ชุดที่ ${sibIndex} / ${sibs.length}</span>`:''}${snap?.capturedAt?`<span class="scope-count">บันทึกสถานะเมื่อ ${esc(fmtDate(snap.capturedAt))}</span>`:''}</div>`:'';
+ const conflictBanner=p.remoteUpdate?`<div class="detail-conflict-banner"><div><b>เครื่องอื่นบันทึกข้อมูลชุดใหม่ลงชีตแล้ว</b><small>${status(p.remoteUpdate)==='complete'?'ในชีตดำเนินการครบ 7/7 มุมแล้ว · กด “ใช้ข้อมูลจากชีต” เพื่อซิงก์ให้ตรงกัน':'มี Revision ใหม่ในชีต · ตรวจสอบหรือเลือกใช้ข้อมูลจากชีตได้'}</small></div><div class="actions"><button type="button" class="small" id="detail-cloud-view">ดูรูปจากชีต</button><button type="button" class="small primary" id="detail-cloud-accept">ใช้ข้อมูลจากชีต</button></div></div>`:'';
  const infoRows=[['Item Code',p.code],['Description',p.name],...(scoped?[['Stock Company',stCompany||'—'],['Stock Location',stLocation||'—'],['Inventory Status',stStatus||'—'],[snap?.capturedAt?'On Hand Qty (ณ เวลาถ่าย)':'On Hand Qty (ณ วันนำเข้า)',stQty!==''&&stQty!==undefined?stQty:'—'],...(snap?.capturedAt?[['บันทึกสถานะสต็อกเมื่อ',fmtDate(snap.capturedAt)]]:[])]:[]),['Purpose of request',p.purpose||'—'],['ไฟล์ต้นฉบับ',batches.find(b=>b.id===p.importId)?.name||'—'],['แท็บ / แถวต้นฉบับ',p.sourceSheet?p.sourceSheet+' / '+p.sourceRow:'—'],['ชื่อผู้ถ่าย',p.fields?.photographer||'ยังไม่ระบุ'],['Revision ที่แสดง / Export',p.newRevision?'ฉบับร่างใหม่':p.revisionNumber||'ยังไม่บันทึก'],['บันทึกลงชีตล่าสุด',fmtDate(p.syncedAt)]];
- main.innerHTML=`<div class="detail-top"><button class="icon-button" id="back" aria-label="กลับรายการสินค้า">${icon('back')}</button><div><div class="breadcrumb"><a href="#products">รายการสินค้า</a> / รายละเอียดสินค้า</div><h1>${esc(p.code)}</h1>${scopeBar}<p class="subtext">${esc(p.name)}</p></div><div class="actions">${badge(p)}<button id="product-pdf" ${n.total?'':'disabled'}>${icon('file')}PDF</button></div></div>${p.demo?'<div class="notice">ข้อมูลสมมติสำหรับทดลองหน้าถ่ายรูป • จะไม่ส่งสินค้าตัวอย่างนี้ขึ้น Google</div>':''}<details class="panel detail-disclosure"><summary class="panel-head"><h2>ข้อมูลสินค้า</h2><span class="badge neutral">${p.baseRevision?'มีเวอร์ชันในชีต':'ฉบับร่าง'}</span></summary><div class="panel-body detail-grid"><div class="details">${infoRows.map(([k,v])=>`<dl><dt>${k}</dt><dd>${k==='Inventory Status'&&v!=='—'?stockStatusBadge(v):esc(v)}</dd></dl>`).join('')}</div><div class="overall"><h3>ความคืบหน้าการถ่ายรูป</h3><b>${n.required}<small> / 7 มุมบังคับ</small></b><div class="progress-track"><i style="width:${n.handled/7*100}%"></i></div><small>${n.waived?'ยกเว้น '+n.waived+' มุม · ':''}${n.total} รูปทั้งหมด · สูงสุดมุมละ 5 รูป</small></div></div></details><details class="panel detail-disclosure"><summary>Location และสต็อก</summary><div class="panel-body"><div id="stock-summary">กำลังตรวจสต็อก…</div></div></details><div class="section-tabs">${[['gallery','ภาพถ่ายสินค้า'],['details','ขนาดและข้อมูลเพิ่มเติม'],['history','ประวัติการบันทึก']].map(([id,label])=>`<button data-section="${id}" class="${section===id?'active':''}">${label}</button>`).join('')}</div><div id="detail-content"></div>`;
+ main.innerHTML=`<div class="detail-top"><button class="icon-button" id="back" aria-label="กลับรายการสินค้า">${icon('back')}</button><div><div class="breadcrumb"><a href="#products">รายการสินค้า</a> / รายละเอียดสินค้า</div><h1>${esc(p.code)}</h1>${scopeBar}<p class="subtext">${esc(p.name)}</p></div><div class="actions">${badge(p)}<button id="product-pdf" ${n.total?'':'disabled'}>${icon('file')}PDF</button></div></div>${conflictBanner}${p.demo?'<div class="notice">ข้อมูลสมมติสำหรับทดลองหน้าถ่ายรูป • จะไม่ส่งสินค้าตัวอย่างนี้ขึ้น Google</div>':''}<details class="panel detail-disclosure"><summary class="panel-head"><h2>ข้อมูลสินค้า</h2><span class="badge neutral">${p.baseRevision?'มีเวอร์ชันในชีต':'ฉบับร่าง'}</span></summary><div class="panel-body detail-grid"><div class="details">${infoRows.map(([k,v])=>`<dl><dt>${k}</dt><dd>${k==='Inventory Status'&&v!=='—'?stockStatusBadge(v):esc(v)}</dd></dl>`).join('')}</div><div class="overall"><h3>ความคืบหน้าการถ่ายรูป</h3><b>${n.required}<small> / 7 มุมบังคับ</small></b><div class="progress-track"><i style="width:${n.handled/7*100}%"></i></div><small>${n.waived?'ยกเว้น '+n.waived+' มุม · ':''}${n.total} รูปทั้งหมด · สูงสุดมุมละ 5 รูป</small></div></div></details><details class="panel detail-disclosure"><summary>Location และสต็อก</summary><div class="panel-body"><div id="stock-summary">กำลังตรวจสต็อก…</div></div></details><div class="section-tabs">${[['gallery','ภาพถ่ายสินค้า'],['details','ขนาดและข้อมูลเพิ่มเติม'],['history','ประวัติการบันทึก']].map(([id,label])=>`<button data-section="${id}" class="${section===id?'active':''}">${label}</button>`).join('')}</div><div id="detail-content"></div>`;
  loadStock(p);
+ $('#detail-cloud-view')?.addEventListener('click',()=>{if(p.remoteUpdate)openPhotoViewer(p.remoteUpdate,{modal,openModal,modalHeader,photoUrl,thumbnailUrl});});
+ $('#detail-cloud-accept')?.addEventListener('click',()=>run(()=>acceptCloudVersion(p.id)));
  $('#product-pdf').onclick=()=>run(async()=>{await saveDraft();openReportPicker([current]);});$('#back').onclick=()=>location.hash='products';main.querySelectorAll('[data-section]').forEach(b=>b.onclick=()=>location.hash='product/'+p.id+'/'+b.dataset.section);if(p.closed){$('#detail-content').innerHTML='<section class="panel modal-body">'+badge(p)+' · ยกเว้นการถ่ายรูป '+jobCloseButton(p)+'</section>';bindJobClose($('#detail-content'));return;}if(section==='details')renderFields();else if(section==='history')renderHistory();else renderGallery();renderSaveBar();
 }
 function renderGallery(){
@@ -260,6 +349,7 @@ function renderGallery(){
   const updated=await db.setAngleWaiver(galleryJob.id,angle,!angleNotApplicable(galleryJob,angle));
   Object.assign(galleryJob,updated);
   if(current===galleryJob)renderDetail();
+  if(!galleryJob.demo&&progress(galleryJob).handled===7)queuePhotoUpload(galleryJob);
  }));
  main.querySelectorAll('[data-library]').forEach(button=>{
   const angle=button.dataset.library,input=$('#library-'+angle);
@@ -363,18 +453,16 @@ async function addPhotos(angle,files){
  if(!files.length||!job||job.closed||angleNotApplicable(job,angle))return;
  const remaining=MAX_PHOTOS-(job.photos?.[angle]?.length||0);
  if(files.length>remaining)throw Error('มุมนี้เหลือ '+remaining+' ช่อง กรุณาเลือกไม่เกินจำนวนที่เหลือ');
- for(const file of files){
-  validatePhotoFile(file);
-  try{const bitmap=await createImageBitmap(file);bitmap.close();}
-  catch{throw Error('อ่านรูปไม่ได้ กรุณาเลือกไฟล์ JPG, PNG หรือ WebP ที่สมบูรณ์');}
- }
+ for(const file of files)validatePhotoFile(file);
+ const prepared=[];
+ for(const file of files)prepared.push(await optimizePhoto(file));
  if(current!==job||job.closed)return;
- const assets=files.map(blob=>({id:uid(),blob}));
+ const assets=prepared.map(item=>({id:uid(),blob:item.blob,name:item.name}));
  const updated=await db.appendPhotos(job.id,angle,assets,currentPhotographer(job));
  Object.assign(job,updated);
  if(current===job){
   renderDetail();
-  toast('เพิ่ม '+files.length+' รูปแล้ว');
+  toast('เพิ่ม '+prepared.length+' รูปแล้ว · เริ่มอัปโหลดเข้า Drive');
  }
  if(!job.demo)queuePhotoUpload(job);
 }
@@ -457,7 +545,7 @@ async function applyJobLocations(p,slots,focusSlotKey=''){
  busy('บันทึก Location แล้ว · กำลังอัปเดตรายการ',65);
  for(const id of res.removed||[])await db.remove('products',id);
  closeModal();
- await refreshCloud(true);
+ await refreshCloudFresh(true);
  await reloadLocal();
  const sibs=siblingProducts(p);
  const target=(focusSlotKey&&sibs.find(s=>stockSlotKey(s.stockCompany,s.stockLocation,s.stockStatus)===focusSlotKey))||sibs.find(s=>s.id===p.id)||sibs.find(s=>s.id===res.activeProductId)||sibs[0];
@@ -500,13 +588,16 @@ function openEditLocations(p,liveRows=[]){
  };
  renderBody();
 }
-async function saveCloud(){const missing=missingCaptureAngles(current);if(missing.length)throw Error(missingAngleMessage(missing));if(current.demo)throw Error('ข้อมูลสมมติใช้ทดลองในเครื่องเท่านั้น กรุณานำเข้าสินค้าจริงเพื่อบันทึก');if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ในหน้าตั้งค่าก่อน');if(current.dirty||!current.baseRevision)assignPhotographer(current,currentPhotographer());await saveDraft();if(!current.fields?.photographer?.trim())throw Error('กรุณาระบุชื่อผู้ถ่ายก่อนบันทึก');const p=current;await photoUploads.get(p.id);await cloud.saveProduct(p,(message,percent)=>{busy(message,percent);uploadStatus(message,percent);});uploadStatus('บันทึกลง Google สำเร็จ',100);await reloadLocal();if(current!==p)return;const next=nextPendingSibling(p);if(next){location.hash='product/'+next.id;toast('อัปโหลดและบันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}else{location.hash='products';toast('อัปโหลดและบันทึกสำเร็จ 100%');}await refreshCloud(true);}
+async function saveCloud(){const missing=missingCaptureAngles(current);if(missing.length)throw Error(missingAngleMessage(missing));if(current.demo)throw Error('ข้อมูลสมมติใช้ทดลองในเครื่องเท่านั้น กรุณานำเข้าสินค้าจริงเพื่อบันทึก');if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ในหน้าตั้งค่าก่อน');if(current.dirty||!current.baseRevision)assignPhotographer(current,currentPhotographer());await saveDraft();if(!current.fields?.photographer?.trim())throw Error('กรุณาระบุชื่อผู้ถ่ายก่อนบันทึก');const p=current;await photoUploads.get(p.id)?.catch(()=>{});await saveProductLocked(p.id,(message,percent)=>{busy(message,percent);uploadStatus(message,percent);});uploadStatus('บันทึกลง Google สำเร็จ',100);if(current===p)rememberCapture(current);await reloadLocal();await refreshCloudFresh(true).catch(()=>{});await reloadLocal();if(current?.id!==p.id)return;const next=nextPendingSibling(p);if(next){location.hash='product/'+next.id;toast('อัปโหลดและบันทึกสำเร็จ 100% · ไปชุดถัดไป: '+(stockLabel(next)||next.code));}else{location.hash='products';toast('อัปโหลดและบันทึกสำเร็จ 100%');}}
 function updateSyncStatus(){
  const button=$('#refresh');if(button){button.disabled=syncing;button.innerHTML=icon('refresh')+(syncing?'กำลังดึงข้อมูลล่าสุด…':'รีเฟรชจากชีต');}
  const box=$('#sync-status');if(!box)return;
  box.classList.toggle('sync-error',!!syncError);
- box.innerHTML=syncing?'<b>'+esc(pullCloud.message||'กำลังอ่านชีต')+' · '+(pullCloud.percent||0)+'%</b>':syncError?'<b>รีเฟรชไม่สำเร็จ · ยังแสดงข้อมูลครั้งก่อน</b><span>'+esc(syncError)+'</span>':'<b>'+(lastSync?'ซิงก์สำเร็จล่าสุด '+fmtDate(lastSync):'กำลังรอข้อมูลจากชีต')+'</b><span>ตรวจอัปเดตทุก 30 วินาที และเมื่อกลับเข้าแอป'+(syncResult?' · ดึงจากชีต '+syncResult.total+' รายการ':'')+'</span>';
- if(syncResult?.drafts)box.innerHTML+='<span>เก็บฉบับร่างที่แก้ไขจริงในเครื่อง '+syncResult.drafts+' รายการ'+(syncResult.conflicts?' · '+syncResult.conflicts+' รายการมีข้อมูลใหม่จากชีต เปิด “ดูรูปจากชีต” เพื่อเทียบได้':'')+'</span>';
+ const unsynced=products.filter(p=>p.dirty&&!p.demo);
+ const readyDrafts=unsynced.filter(p=>!p.closed&&progress(p).handled===7&&p.fields?.photographer?.trim()&&!p.remoteUpdate);
+ const draftNote=unsynced.length?'<span>มีฉบับร่างในเครื่อง '+unsynced.length+' รายการ (เครื่องอื่นยังไม่เห็นจนกว่าจะบันทึกลงชีต)'+(syncResult?.conflicts?' · '+syncResult.conflicts+' รายการมีข้อมูลใหม่จากชีต':'')+'</span>'+(readyDrafts.length?'<div class="sync-status-actions"><button type="button" class="small primary" id="sync-pending-drafts">บันทึกงานที่ครบขึ้นชีต ('+readyDrafts.length+')</button></div>':''):syncResult?.conflicts?'<span>'+syncResult.conflicts+' รายการมีข้อมูลใหม่จากชีต เปิด “ดูรูปจากชีต” หรือกด “ใช้ข้อมูลจากชีต” ได้</span>':'';
+ box.innerHTML=(syncing?'<b>'+esc(pullCloud.message||'กำลังอ่านชีต')+' · '+(pullCloud.percent||0)+'%</b>':syncError?'<b>รีเฟรชไม่สำเร็จ · ยังแสดงข้อมูลครั้งก่อน</b><span>'+esc(syncError)+'</span>':'<b>'+(lastSync?'ซิงก์สำเร็จล่าสุด '+fmtDate(lastSync):'กำลังรอข้อมูลจากชีต')+'</b><span>ตรวจอัปเดตทุก 30 วินาที และเมื่อกลับเข้าแอป'+(syncResult?' · ดึงจากชีต '+syncResult.total+' รายการ':'')+'</span>')+draftNote;
+ $('#sync-pending-drafts')?.addEventListener('click',()=>run(()=>flushUnsavedDrafts(true)));
 }
 function refreshProductView(){
  if(!$('#table-area'))return;
@@ -519,6 +610,7 @@ const pullCloud=singleFlight(async()=>{
  syncing=true;syncError='';lastRefreshAttempt=Date.now();updateSyncStatus();
  try{
   if(!cloud.connected())await cloud.connect(settings);
+  await reloadLocal();
   // Refresh is read-only: a failed pending import must not block the team's updates.
   setSyncProgress(15,'กำลังอ่านชีต');
   const bases=products.filter(p=>p.dirty&&p.baseRevision).map(p=>p.baseRevision);
@@ -528,25 +620,40 @@ const pullCloud=singleFlight(async()=>{
   await reloadLocal();
   // New clients can display jobs before the separate live stock read for legacy rows.
   const needsLiveStock=!!fresh.legacyCodes?.length;
+  const legacyKey=needsLiveStock?[...fresh.legacyCodes].sort().join(','):'';
+  const hasUnsplitLegacy=needsLiveStock&&rows.some(r=>!r.closed&&!r.stockCompany&&!r.stockLocation&&!r.stockStatus&&!r.baseRevision&&!Object.values(r.photos||{}).some(a=>a.length));
+  const fetchLegacyStock=needsLiveStock&&(hasUnsplitLegacy||workspace.stock?.legacyKey!==legacyKey||!workspace.stock?.checkedAt);
   if(needsLiveStock)fresh.stock=workspace.stock||{rows:[]};
   if(!needsLiveStock&&await splitPending(rows,fresh.stock)){
    fresh=await cloud.snapshot(bases);rows=await cloud.loadProducts(fresh);
   }
   async function commitRows(){
-   for(const entry of fresh.deletions||[])if(batches.some(b=>b.id===entry.id)){await db.deleteBatch(entry.id);if(current?.importId===entry.id){current=null;location.hash='imports';toast('งานนี้ถูกลบจากชีตแล้ว');}}
+   for(const entry of fresh.deletions||[])if(batches.some(b=>b.id===entry.id)||products.some(p=>p.importId===entry.id)){if(typeof db.deleteBatch==='function')await db.deleteBatch(entry.id);if(current?.importId===entry.id){current=null;location.hash='imports';toast('งานนี้ถูกลบจากชีตแล้ว');}}
+   const completedImportIds=new Set((fresh.imports||[]).map(r=>r[0]));
+   if(typeof db.remove==='function'){
+    for(const oldBatch of batches)if(oldBatch.synced&&!completedImportIds.has(oldBatch.id))await db.remove('imports',oldBatch.id);
+   }
    for(const r of fresh.imports){const old=batches.find(b=>b.id===r[0]);if(old?.synced&&old.name===r[1]&&old.createdAt===r[2]&&old.driveId===r[3]&&old.count===Number(r[5]))continue;await db.put('imports',{...old,id:r[0],name:r[1],createdAt:r[2],driveId:r[3],count:Number(r[5]),synced:true,workbook:old?.workbook||{sheets:[]}});}
    setSyncProgress(80,'กำลังบันทึกข้อมูลล่าสุดในเครื่อง');
-   const updated=await db.mergeCloudProducts(rows,(local,remote)=>reconcileProduct(local,remote,fresh.revisions),current?.id);
+   const preserveId=current&&(current.dirty||(typeof photoUploads!=='undefined'&&photoUploads.has(current.id)))?current.id:null;
+   const canDelete=local=>!local.demo&&(local.importSynced||completedImportIds.has(local.importId))&&(typeof hasLocalEdits==='function'?!hasLocalEdits(local,{purpose:local.purpose},fresh.revisions):!local.dirty);
+   const updated=await db.mergeCloudProducts(rows,(local,remote)=>reconcileProduct(local,remote,fresh.revisions),preserveId,canDelete);
    await db.put('settings',{id:'workspace-cache',options:fresh.options,data:fresh.data,stock:fresh.stock,at:fresh.at});
-   if(fresh.branding&&(!fresh.partsChanged||fresh.partsChanged.includes('branding'))){await db.put('settings',{id:'branding',...fresh.branding,cacheVersion:brandCacheVersion});brand=fresh.branding;applyBranding();}
+   if(fresh.branding&&(!fresh.partsChanged||fresh.partsChanged.includes('branding'))){await db.put('settings',{id:'branding',...fresh.branding,cacheVersion:typeof brandCacheVersion!=='undefined'?brandCacheVersion:''});brand=fresh.branding;applyBranding();}
    workspace=fresh;lastSync=fresh.at;await reloadLocal();
    syncResult={total:rows.length,updated,drafts:products.filter(p=>p.dirty).length,conflicts:products.filter(p=>p.remoteUpdate).length};
-   if(!current&&!modal.open&&(updated||!fresh.partsChanged||fresh.partsChanged.length)){if($('#table-area'))refreshProductView();else if(!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))await route();}
+   if(current&&!modal.open){
+    const freshCurrent=products.find(p=>p.id===current.id);
+    if(!freshCurrent){current=null;if(typeof rememberCapture==='function')rememberCapture(null);location.hash='products';toast('รายการนี้ถูกลบหรือเปลี่ยน Location จากเครื่องอื่นแล้ว');}
+    else if(JSON.stringify(freshCurrent)!==JSON.stringify(current)){current=freshCurrent;if(typeof renderDetail==='function')renderDetail();}
+   }else if(!current&&!modal.open&&(updated||!fresh.partsChanged||fresh.partsChanged.length)){
+    if($('#table-area'))refreshProductView();else if(!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))await route();
+   }
   }
   await commitRows();
-  if(needsLiveStock){
+  if(fetchLegacyStock){
    setSyncProgress(90,'แสดงรายการแล้ว · กำลังตรวจ Location จากสต็อก');
-   const stock=await cloud.legacyStock(fresh.legacyCodes);
+   const stock={...(await cloud.legacyStock(fresh.legacyCodes)),legacyKey};
    if(await splitPending(rows,stock)){
     fresh=await cloud.snapshot(bases);rows=await cloud.loadProducts(fresh);
     fresh.stock=stock;await commitRows();
@@ -572,7 +679,7 @@ async function splitPending(rows,stock){
     return stockCodes.has(norm(r.code));
    });
  if(!hasPendingUnsplit)return false;
- try{const result=await cloud.splitPendingStock();return !!(result?.split||result?.created);}
+ try{await cloud.splitPendingStock();return true;}
  catch(error){if(/ไม่รองรับคำสั่งนี้/.test(error.message||'')){pullCloud.skipSplit=true;return false;}throw error;}
 }
 function setSyncProgress(percent,message){
@@ -581,12 +688,18 @@ function setSyncProgress(percent,message){
  updateSyncStatus();
 }
 async function refreshCloud(silent=false,onProgress){
+ if(!silent&&!syncing)cloud.clearSnapshotCache?.();
  const listeners=pullCloud.listeners??=new Set();
  if(onProgress){listeners.add(onProgress);onProgress(syncing?pullCloud.message:'กำลังอ่านข้อมูลจากชีต',syncing?pullCloud.percent:0);}
  let result;
  try{result=await pullCloud();}finally{listeners.delete(onProgress);}
  if(!silent)toast('รีเฟรชสำเร็จ · ดึงจากชีต '+result.total+' รายการ'+(result.drafts?' · เก็บฉบับร่างในเครื่อง '+result.drafts+' รายการ':'')+(batchFilter||(typeof stockStatusFilter!=='undefined'&&stockStatusFilter)||query||importFrom||importTo||filter!=='all'?' · มีตัวกรองเปิดอยู่':''));
  return result;
+}
+async function refreshCloudFresh(silent=true){
+ if(syncing)await pullCloud().catch(()=>{});
+ cloud.clearSnapshotCache?.();
+ return refreshCloud(silent);
 }
 function openImport(){importState=null;openModal(modalHeader('Import File')+`<div class="modal-body"><p class="subtext" style="margin-bottom:20px">นำเข้าแบบฟอร์มขอรูปถ่ายสินค้า แล้วตรวจรายการก่อนเริ่มงาน</p><label class="dropzone" id="dropzone" tabindex="0">${icon('import')}<strong>เลือกไฟล์ หรือลากไฟล์มาวางที่นี่</strong><small>Excel (.xlsx, .xls) หรือ CSV · สูงสุด 25 MB</small><input type="file" id="import-file" accept=".xlsx,.xls,.csv" hidden></label><div class="sync-note" style="margin-top:18px">${icon('info')}<span>ข้อมูลทุกแท็บจะถูกเก็บพร้อมไฟล์ต้นฉบับเมื่อบันทึกลง Google ระบบจะอ่านแบบฟอร์มและตรวจรายการสินค้าให้อัตโนมัติ</span></div></div>`);
  const input=$('#import-file'),zone=$('#dropzone');input.onchange=()=>input.files[0]&&run(()=>parseImport(input.files[0]));
@@ -734,7 +847,7 @@ function renderImports(){
  main.innerHTML=title('','ไฟล์นำเข้า','เรียงตามวันที่นำเข้าล่าสุด',`<button class="primary" id="import">${icon('import')}นำเข้าไฟล์</button>`)+`<section class="panel"><div class="panel-head"><h2>ประวัติการนำเข้า</h2><small>${batches.length} ไฟล์</small></div><div class="panel-body">${batches.length?batches.map(b=>`<div class="import-list-item"><div class="stat-icon">${icon('file')}</div><div><h3>${esc(b.name)}</h3><p>${fmtDate(b.createdAt)} · ${b.count} สินค้า · ${b.workbook?.sheets?.length||'—'} แท็บ</p><div class="actions" style="margin-top:8px"><button class="small" data-batch="${b.id}">ดูรายการ</button>${b.synced?`<a class="text-link" style="margin:0" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${encodeURIComponent(b.driveId)}/view">ไฟล์ต้นฉบับใน Drive ↗</a>`:`<button class="small" data-sync-import="${b.id}">${icon('cloud')}บันทึกลง Google</button>`}<button class="danger small" data-delete-batch="${b.id}">ลบทั้งไฟล์</button></div></div><span class="badge ${b.synced?'complete':'waiting'}">${b.synced?'บันทึกแล้ว':'อยู่ในเครื่อง'}</span></div>`).join(''):'<div class="empty"><div class="empty-illustration">'+icon('file')+'</div><h3>ยังไม่มีไฟล์นำเข้า</h3><p>ไฟล์ที่นำเข้าจะปรากฏที่นี่ พร้อมสถานะการบันทึก</p></div>'}</div></section><div class="sync-note">${icon('info')}<span>รายการสินค้าลง Data ตามหัวข้อเดิม พร้อมข้อมูลเพิ่มเติมและลิงก์รูป Drive • ข้อมูลทุกเซลล์และทุกแท็บยังมีสำรองใน PIM_Source และไฟล์ Excel ต้นฉบับใน Drive</span></div>`;
  if(pending.length)main.insertAdjacentHTML('beforeend','<section class="panel"><div class="panel-head"><h2>งานที่ยังลบไม่ครบ</h2></div><div class="panel-body">'+pending.map(b=>'<div class="import-list-item"><div><h3>'+esc(b.name)+'</h3><p>การลบครั้งก่อนยังไม่เสร็จ กดทำต่อเพื่อลบข้อมูลที่เหลือ</p></div><button class="danger" data-delete-batch="'+esc(b.id)+'">ทำการลบต่อ</button></div>').join('')+'</div></section>');
  main.querySelectorAll('[data-delete-batch]').forEach(b=>b.onclick=()=>openDeleteImport(b.dataset.deleteBatch));$('#import').onclick=openImport;main.querySelectorAll('[data-batch]').forEach(b=>b.onclick=()=>{batchFilter=b.dataset.batch;boardScope='all';filter='all';query='';stockStatusFilter='';importFrom='';importTo='';page=1;location.hash='products';});
- main.querySelectorAll('[data-sync-import]').forEach(b=>b.onclick=()=>run(async()=>{if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ก่อน');const batch=batches.find(x=>x.id===b.dataset.syncImport);await cloud.syncImport(batch,products.filter(x=>x.importId===batch.id),busy);await reloadLocal();renderImports();toast('บันทึกไฟล์ต้นฉบับและข้อมูลทุกแท็บสำเร็จ');}));
+ main.querySelectorAll('[data-sync-import]').forEach(b=>b.onclick=()=>run(async()=>{if(!cloud.connected())throw Error('กรุณาเชื่อมต่อ Google ก่อน');const batch=batches.find(x=>x.id===b.dataset.syncImport);await cloud.syncImport(batch,products.filter(x=>x.importId===batch.id),busy);await refreshCloudFresh(true);renderImports();toast('บันทึกไฟล์ต้นฉบับและข้อมูลทุกแท็บสำเร็จ');}));
 }
 function renderSettings(){
  main.innerHTML=title('WORKSPACE SETTINGS','การตั้งค่า','ข้อมูลสินค้าใน Google Sheets · รูปภาพใน Google Drive')+brandingPanel()+'<section class="panel"><div class="panel-head"><h2>Google Workspace</h2><span id="google-state" class="badge '+(cloud.connected()?'complete':'neutral')+'">'+(cloud.connected()?'เชื่อมต่อแล้ว':'ยังไม่เชื่อมต่อ')+'</span></div><div class="panel-body"><p>พื้นที่ทำงานส่วนกลาง · ทุกเครื่องที่มีลิงก์ใช้ชีตและรูปชุดเดียวกัน</p><p class="help">ทุกคนที่มีลิงก์สามารถดู เพิ่ม แก้ไข และลบข้อมูลได้ โดยไม่ต้องแจ้งอีเมลล่วงหน้า ฉบับร่างที่ยังไม่บันทึกจะอยู่เฉพาะเครื่องนี้</p><div id="google-recovery" class="actions" '+(cloud.connected()?'hidden':'')+'><button id="connect-popup" class="primary">เชื่อมต่อ Google</button><a class="text-link" href="'+esc(SCRIPT_URL)+'" target="_blank" rel="noopener">เปิดบริการข้อมูลส่วนกลาง</a></div><p class="help">แอปจะเชื่อมต่ออัตโนมัติ หากเบราว์เซอร์บล็อกการเชื่อมต่อ ให้กด “เชื่อมต่อ Google” · เปิดหน้าต่าง Google นี้ค้างไว้ระหว่างใช้งาน (ย่อได้) · หากหน้าต่างไม่เปิด ให้อนุญาตป๊อปอัปสำหรับเว็บนี้ แล้วกดอีกครั้ง หลังเชื่อมครั้งแรก ระบบจะจำการเชื่อมต่อในแท็บนี้และเชื่อมกลับเองหลังรีโหลดหรืออินเทอร์เน็ตกลับมา หากปิดหน้าต่างบริการข้อมูล อาจต้องกดเชื่อมใหม่</p><div class="divider"></div><div class="actions" style="margin-top:16px"><button id="backup-drafts">ส่งออกฉบับร่างทั้งหมด</button><button id="restore-drafts">นำเข้าฉบับร่าง</button><button id="paste-drafts">วางข้อมูลฉบับร่าง</button><input id="draft-file" type="file" accept=".json" hidden></div></div></section>';
@@ -776,12 +889,12 @@ window.addEventListener('unhandledrejection',e=>{toast(e.reason?.message||'เ�
 let autoConnecting=false,appReady=false,lastAutoAttempt=0;
 async function autoSync(){
  if(!document.hidden&&$('#table-area')&&renderedBoardDay!==todayInBangkok())renderTable();
- if(!appReady||autoConnecting||working||current||photoUploads.size||document.hidden)return;
+ if(!appReady||autoConnecting||working||photoUploads.size||document.hidden)return;
  if(cloud.connected()&&Date.now()-lastRefreshAttempt<15000)return;
  if(modal.open&&cloud.connected())return;
  const reconnect=!cloud.connected();if(reconnect&&Date.now()-lastAutoAttempt<15000)return;
  autoConnecting=true;lastAutoAttempt=Date.now();updateConnection();
- try{if(reconnect){await cloud.connect(settings);window.dispatchEvent(new Event('pim-cloud-connected'));}updateConnection();if(!modal.open)await refreshCloud(true);}catch(e){syncError=e.message||String(e);updateSyncStatus();}finally{autoConnecting=false;updateConnection();}
+ try{if(reconnect){await cloud.connect(settings);window.dispatchEvent(new Event('pim-cloud-connected'));}updateConnection();if(!modal.open){await refreshCloud(true);flushUnsavedDrafts(false).catch(()=>{});}}catch(e){syncError=e.message||String(e);updateSyncStatus();}finally{autoConnecting=false;updateConnection();}
 }
 
 
